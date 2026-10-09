@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stock de Semillas · MORERO</title>
+  <meta name="description" content="Manejo de stock de semillas de MORERO Semillas y Cereales S.A.">
+  <link rel="icon" href="logo2Morero2011.jpg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="encabezado">
+    <img src="logo2Morero2011.jpg" alt="MORERO" class="logo">
+    <div>
+      <h1>Stock de Semillas</h1>
+      <p class="sub">MORERO Semillas y Cereales S.A.</p>
+    </div>
+  </header>
+
+  <nav class="menu" id="menu">
+    <button data-sec="inicio" class="activo">Inicio</button>
+    <button data-sec="hibridos">Híbridos</button>
+    <button data-sec="clientes">Clientes</button>
+    <button data-sec="compras">Compras</button>
+    <button data-sec="ventas">Ventas</button>
+    <button data-sec="posicion">Posición comercial</button>
+    <button data-sec="reporte">Reporte de stock</button>
+    <button data-sec="copia">Copia de seguridad</button>
+  </nav>
+
+  <main>
+    <!-- INICIO -->
+    <section id="sec-inicio" class="seccion activa">
+      <h2>¿Qué querés hacer?</h2>
+      <div class="accesos">
+        <button class="acceso" data-ir="compras" data-accion="nuevaCompra"><span>＋</span>Cargar compra</button>
+        <button class="acceso" data-ir="ventas" data-accion="nuevaVenta"><span>－</span>Cargar venta o reserva</button>
+        <button class="acceso" data-ir="posicion"><span>▤</span>Posición comercial</button>
+        <button class="acceso" data-ir="reporte"><span>☰</span>Reporte de stock</button>
+        <button class="acceso gris" data-ir="hibridos"><span>❀</span>Lista de híbridos</button>
+        <button class="acceso gris" data-ir="clientes"><span>☺</span>Clientes</button>
+      </div>
+      <h2>Stock actual por grano</h2>
+      <div id="resumen-inicio" class="resumen"></div>
+      <p class="aviso">Los datos se guardan solo en este navegador y en este dispositivo. Bajá una <a href="#" data-ir="copia">copia de seguridad</a> cada tanto.</p>
+    </section>
+
+    <!-- HIBRIDOS -->
+    <section id="sec-hibridos" class="seccion">
+      <h2>Lista de híbridos</h2>
+      <div class="barra">
+        <button class="btn" id="btn-nuevo-hibrido">＋ Cargar híbrido</button>
+        <label class="btn btn-sec">Importar Excel
+          <input type="file" id="imp-hibridos" accept=".xlsx,.xls,.csv" hidden>
+        </label>
+        <button class="btn btn-link" id="modelo-hibridos">Bajar planilla modelo</button>
+      </div>
+      <p class="ayuda">El Excel debe tener las columnas <b>Semillero</b>, <b>Híbrido</b> y <b>Grano</b> (Girasol, Maíz o Sorgo). El archivo se lee en tu computadora y no se sube a ningún lado.</p>
+      <div class="filtros">
+        <input type="search" id="busca-hibridos" placeholder="Buscar semillero o híbrido…">
+        <select id="grano-hibridos">
+          <option value="">Todos los granos</option>
+        </select>
+      </div>
+      <div class="tabla-cont"><table id="tabla-hibridos"></table></div>
+    </section>
+
+    <!-- CLIENTES -->
+    <section id="sec-clientes" class="seccion">
+      <h2>Clientes</h2>
+      <div class="barra">
+        <button class="btn" id="btn-nuevo-cliente">＋ Cargar cliente</button>
+        <label class="btn btn-sec">Importar Excel
+          <input type="file" id="imp-clientes" accept=".xlsx,.xls,.csv" hidden>
+        </label>
+        <button class="btn btn-link" id="modelo-clientes">Bajar planilla modelo</button>
+      </div>
+      <p class="ayuda">El Excel debe tener la columna <b>Nombre</b> y, si querés, <b>CUIT</b>, <b>Localidad</b>, <b>Teléfono</b> y <b>Correo</b>.</p>
+      <div class="filtros">
+        <input type="search" id="busca-clientes" placeholder="Buscar cliente…">
+      </div>
+      <div class="tabla-cont"><table id="tabla-clientes"></table></div>
+    </section>
+
+    <!-- COMPRAS -->
+    <section id="sec-compras" class="seccion">
+      <h2>Compras e ingresos</h2>
+      <div class="barra">
+        <button class="btn" id="btn-nueva-compra">＋ Cargar compra</button>
+      </div>
+      <p class="ayuda">Suman stock: existencia inicial de campaña, compras, pedidos y mercadería consignada.</p>
+      <div class="filtros">
+        <input type="search" id="busca-compras" placeholder="Buscar híbrido, semillero u observación…">
+        <select id="tipo-compras"><option value="">Todos los tipos</option></select>
+      </div>
+      <div class="tabla-cont"><table id="tabla-compras"></table></div>
+    </section>
+
+    <!-- VENTAS -->
+    <section id="sec-ventas" class="seccion">
+      <h2>Ventas y reservas</h2>
+      <div class="barra">
+        <button class="btn" id="btn-nueva-venta">＋ Cargar venta o reserva</button>
+      </div>
+      <p class="ayuda">Las ventas y las reservas descuentan stock.</p>
+      <div class="filtros">
+        <input type="search" id="busca-ventas" placeholder="Buscar cliente o híbrido…">
+        <select id="tipo-ventas"><option value="">Todos los tipos</option></select>
+      </div>
+      <div class="tabla-cont"><table id="tabla-ventas"></table></div>
+    </section>
+
+    <!-- POSICION COMERCIAL -->
+    <section id="sec-posicion" class="seccion">
+      <h2>Posición comercial</h2>
+      <div class="panel-filtros" data-reporte="posicion"></div>
+      <div class="barra">
+        <button class="btn" id="gen-posicion">Generar reporte</button>
+        <button class="btn btn-sec" data-imprimir="posicion">Imprimir / PDF</button>
+        <button class="btn btn-sec" id="xls-posicion">Descargar Excel</button>
+      </div>
+      <div id="out-posicion" class="reporte"></div>
+    </section>
+
+    <!-- REPORTE DE STOCK -->
+    <section id="sec-reporte" class="seccion">
+      <h2>Reporte de stock (ficha por híbrido)</h2>
+      <div class="panel-filtros" data-reporte="reporte"></div>
+      <div class="barra">
+        <button class="btn" id="gen-reporte">Generar reporte</button>
+        <button class="btn btn-sec" data-imprimir="reporte">Imprimir / PDF</button>
+        <button class="btn btn-sec" id="xls-reporte">Descargar Excel</button>
+      </div>
+      <div id="out-reporte" class="reporte"></div>
+    </section>
+
+    <!-- COPIA -->
+    <section id="sec-copia" class="seccion">
+      <h2>Copia de seguridad</h2>
+      <p>Todo lo que cargás queda guardado en este navegador. Si borrás los datos del navegador o cambiás de computadora, se pierde. Por eso conviene bajar una copia seguido.</p>
+      <div class="barra">
+        <button class="btn" id="btn-bajar-copia">Bajar copia de seguridad</button>
+        <label class="btn btn-sec">Restaurar una copia
+          <input type="file" id="subir-copia" accept=".json" hidden>
+        </label>
+      </div>
+      <p class="ayuda">Para pasar los datos a otra computadora o al celular: bajá la copia acá, mandate el archivo y en el otro equipo tocá «Restaurar una copia».</p>
+      <p id="info-copia" class="ayuda"></p>
+    </section>
+  </main>
+
+  <!-- Encabezado que solo se ve al imprimir -->
+  <div class="solo-impresion cabecera-impresion">
+    <img src="logo2Morero2011.jpg" alt="MORERO">
+    <div>
+      <strong>MORERO Semillas y Cereales S.A.</strong><br>
+      <span id="titulo-impresion"></span><br>
+      <small id="fecha-impresion"></small>
+    </div>
+  </div>
+
+  <!-- DIALOGO HIBRIDO -->
+  <dialog id="dlg-hibrido">
+    <form method="dialog" id="form-hibrido">
+      <h3 id="tit-hibrido">Cargar híbrido</h3>
+      <input type="hidden" name="uid">
+      <label>Grano
+        <select name="grano" required></select>
+      </label>
+      <label>Semillero
+        <input name="semillero" list="lista-semilleros" required autocomplete="off" placeholder="Ej.: Nidera">
+      </label>
+      <label>Híbrido
+        <input name="hibrido" required autocomplete="off" placeholder="Ej.: NS 1113">
+      </label>
+      <div class="acciones">
+        <button type="button" class="btn btn-sec" data-cerrar>Cancelar</button>
+        <button type="submit" class="btn" value="ok">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+  <datalist id="lista-semilleros"></datalist>
+
+  <!-- DIALOGO CLIENTE -->
+  <dialog id="dlg-cliente">
+    <form method="dialog" id="form-cliente">
+      <h3 id="tit-cliente">Cargar cliente</h3>
+      <input type="hidden" name="uid">
+      <label>Nombre o razón social
+        <input name="nombre" required autocomplete="off">
+      </label>
+      <div class="dos">
+        <label>CUIT <input name="cuit" autocomplete="off"></label>
+        <label>Localidad <input name="localidad" autocomplete="off"></label>
+      </div>
+      <div class="dos">
+        <label>Teléfono <input name="telefono" type="tel" autocomplete="off"></label>
+        <label>Correo <input name="correo" type="email" autocomplete="off"></label>
+      </div>
+      <div class="acciones">
+        <button type="button" class="btn btn-sec" data-cerrar>Cancelar</button>
+        <button type="submit" class="btn" value="ok">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- DIALOGO MOVIMIENTO (compra o venta) -->
+  <dialog id="dlg-mov">
+    <form method="dialog" id="form-mov">
+      <h3 id="tit-mov">Cargar compra</h3>
+      <input type="hidden" name="uid">
+      <input type="hidden" name="clase">
+      <div class="dos">
+        <label>Tipo
+          <select name="tipo" required></select>
+        </label>
+        <label>Fecha
+          <input type="date" name="fecha" required>
+        </label>
+      </div>
+
+      <div id="bloque-cliente">
+        <label>Cliente
+          <input type="search" id="busca-cliente-mov" placeholder="Escribí el nombre del cliente…" autocomplete="off">
+        </label>
+        <input type="hidden" name="clienteId">
+        <div id="resultados-cliente" class="resultados"></div>
+        <div id="cliente-elegido" class="elegido"></div>
+      </div>
+
+      <label>Híbrido
+        <input type="search" id="busca-hibrido-mov" placeholder="Buscar por semillero o híbrido…" autocomplete="off">
+      </label>
+      <select name="hibridoId" id="sel-hibrido-mov" size="5" required></select>
+
+      <div class="dos">
+        <label>Banda
+          <select name="banda" required>
+            <option value="">Elegir…</option>
+            <option>Banda 1</option>
+            <option>Banda 2</option>
+            <option>Banda 3</option>
+            <option>Sin banda</option>
+          </select>
+        </label>
+        <label>Cantidad (bolsas)
+          <input type="number" name="cantidad" min="0.01" step="any" inputmode="decimal" required>
+        </label>
+      </div>
+      <p id="disp-mov" class="disponible"></p>
+
+      <div class="dos">
+        <label>Precio por bolsa <small>(opcional)</small>
+          <input type="number" name="precio" min="0" step="any" inputmode="decimal">
+        </label>
+        <label>Moneda
+          <select name="moneda">
+            <option value="USD">Dólares (US$)</option>
+            <option value="ARS">Pesos ($)</option>
+          </select>
+        </label>
+      </div>
+      <label>N° de comprobante <small>(opcional)</small>
+        <input name="comprobante" autocomplete="off">
+      </label>
+      <label>Observaciones <small>(opcional)</small>
+        <textarea name="obs" rows="2"></textarea>
+      </label>
+      <div class="acciones">
+        <button type="button" class="btn btn-sec" data-cerrar>Cancelar</button>
+        <button type="submit" class="btn" value="ok">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
