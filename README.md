@@ -27,8 +27,10 @@ Página web para llevar el stock de semillas (girasol, maíz y sorgo): híbridos
        (sin mirar la cantidad). Si ya estaba cargado con la misma cantidad, no se vuelve a cargar; si la cantidad cambió
        en Algoritmo, se muestra «antes X, ahora Y» y se elige actualizarla o dejarla. Lo cargado a mano con el mismo
        número de comprobante, cliente e híbrido también se reconoce.
-     - Columnas del listado de Algoritmo que se usan: «Nombre del Productor», «Descripción», «Cantidad»,
-       «Código Comprobante», «Comprobante» y «Fecha Comprobante» (se reconocen solas).
+     - Columnas del listado de Algoritmo que se usan (ventas y compras tienen el mismo formato): «Nombre del Productor»
+       (cliente o proveedor), «Descripción», «Cantidad», «Código Comprobante», «Comprobante», «Fecha Comprobante»
+       y, opcional, «PRECIO» (precio por bolsa en US$). Se reconocen solas.
+     - Si en ventas el cliente es un semillero de la lista, avisa que puede ser un listado de compras.
 5. **Posición comercial**: totales ingresados, salidas (ventas, reservas, pedidos de clientes, devoluciones) y saldo a remitir por híbrido y banda, filtrando por grano o por híbridos.
 6. **Reporte de stock**: ficha de cada híbrido con todas las operaciones, el saldo y el stock final.
 7. Los reportes se pueden **imprimir / guardar en PDF** o **descargar en Excel**.

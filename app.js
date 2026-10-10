@@ -915,7 +915,7 @@
       var porTitulo = function (k) { return guardado[k] ? titulos.indexOf(guardado[k]) : -1; };
       var col = {
         cliente: porTitulo('cliente'), descripcion: porTitulo('descripcion'), cantidad: porTitulo('cantidad'),
-        fecha: porTitulo('fecha'), comprobante: porTitulo('comprobante'), operacion: porTitulo('operacion')
+        fecha: porTitulo('fecha'), comprobante: porTitulo('comprobante'), operacion: porTitulo('operacion'), precio: porTitulo('precio')
       };
       if (col.cliente < 0) col.cliente = adivinarColumna(titulos, compras
         ? ['nombre del proveedor', 'proveedor', 'nombre del productor', 'razon social', 'nombre', 'denominacion', 'semillero']
@@ -929,6 +929,7 @@
       if (col.operacion < 0) col.operacion = adivinarColumna(titulos, ['codigo comprobante', 'cod. comprobante', 'operacion', 'tipo de comprobante', 'tipo comprobante', 'tipo comp'],
         ['externo', 'entidad', 'articulo', 'cambio']);
       if (col.operacion === col.comprobante) col.operacion = -1;
+      if (col.precio < 0) col.precio = adivinarColumna(titulos, ['precio', 'precio unitario'], ['sin financ', 'lista', 'neto', 'interes']);
 
       var opts = '<option value="-1">— elegir —</option>' + titulos.map(function (t, i) {
         return '<option value="' + i + '">' + esc(t) + '</option>';
@@ -952,7 +953,7 @@
     }, true);
   }
 
-  var CAMPOS_IMP = ['cliente', 'descripcion', 'cantidad', 'operacion', 'fecha', 'comprobante'];
+  var CAMPOS_IMP = ['cliente', 'descripcion', 'cantidad', 'operacion', 'fecha', 'comprobante', 'precio'];
 
   function columnaElegida(k) { return Number($('#form-imp [data-col="' + k + '"]').value); }
 
@@ -991,6 +992,7 @@
       var comp = String(celda(f, 'comprobante')).trim();
       var doc = docDeTexto(celda(f, 'operacion')) || docDeTexto(comp);
       var cant = numeroAR(celda(f, 'cantidad'));
+      var precio = numeroAR(celda(f, 'precio'));
       var h = detectarHibrido(desc);
       var banda = '';
       if (h && h.grano === 'Girasol') banda = bandaGirasol(desc);
@@ -998,7 +1000,7 @@
       imp.filas.push({
         cliente: cli, desc: desc, cantidad: cant,
         fecha: fechaISO(celda(f, 'fecha')) || hoy(),
-        comprobante: comp, doc: doc || porDefecto, docAuto: !!doc,
+        comprobante: comp, doc: doc || porDefecto, docAuto: !!doc, precio: precio > 0 ? precio : null,
         hibridoId: h ? h.id : '', banda: banda, vinculo: ''
       });
     });
@@ -1135,6 +1137,7 @@
     imp.filas.forEach(function (r, i) {
       var prob = problemaFila(r);
       if (solo && !prob) return;
+      var esSemillero = !compras && pareceSemillero(r.cliente);
       var clienteNuevo = !compras && r.cliente && !db.clientes.some(function (c) { return norm(c.nombre) === norm(r.cliente); });
       var vinc = '—';
       if (r.repetida) vinc = '<small>Ya está cargada con la misma cantidad; no se vuelve a cargar.</small>';
@@ -1159,7 +1162,8 @@
       }
       html += '<tr class="' + (!r.importar ? 'omitida' : prob ? 'revisar' : '') + '">' +
         '<td><input type="checkbox" data-i="' + i + '" data-k="importar"' + (r.importar ? ' checked' : '') + '></td>' +
-        '<td>' + esc(r.cliente) + (clienteNuevo && r.importar ? ' <span class="etq warn">cliente nuevo</span>' : '') + '</td>' +
+        '<td>' + esc(r.cliente) + (clienteNuevo && r.importar ? ' <span class="etq warn">cliente nuevo</span>' : '') +
+          (esSemillero ? ' <span class="etq warn">¿es una compra?</span>' : '') + '</td>' +
         '<td><select data-i="' + i + '" data-k="doc" class="sel-doc">' + opcD.replace('value="' + r.doc + '"', 'value="' + r.doc + '" selected') + '</select>' +
           (r.docAuto ? '' : '<br><small>no se reconoció</small>') + '</td>' +
         '<td class="desc">' + esc(r.desc) + (r.comprobante ? '<br><small>' + esc(r.comprobante) + '</small>' : '') + '</td>' +
@@ -1167,7 +1171,8 @@
           ? '<select data-i="' + i + '" data-k="hibridoId">' + opcH.replace('value="' + r.hibridoId + '"', 'value="' + r.hibridoId + '" selected') + '</select>'
           : '<button type="button" class="mini" data-elegir="' + i + '">Elegir híbrido</button>') + '</td>' +
         '<td><select data-i="' + i + '" data-k="banda">' + opcB.replace('<option>' + r.banda + '</option>', '<option selected>' + r.banda + '</option>') + '</select></td>' +
-        '<td class="num">' + (isNaN(r.cantidad) ? '?' : num(r.cantidad)) + '</td>' +
+        '<td class="num">' + (isNaN(r.cantidad) ? '?' : num(r.cantidad)) +
+          (r.precio != null ? '<br><small>' + precioTxt({ precio: r.precio, moneda: 'USD' }) + '</small>' : '') + '</td>' +
         '<td>' + fechaTxt(r.fecha) + '</td>' +
         '<td>' + vinc + '</td>' +
         '<td>' + (prob ? '<span class="etq warn">' + prob + '</span>' : '<span class="etq in">OK</span>') + '</td></tr>';
@@ -1181,7 +1186,10 @@
     var marcadasMal = imp.filas.filter(function (r) { return r.importar && problemaBasico(r); }).length;
     var sinH = imp.filas.filter(function (r) { return !r.hibridoId; }).length;
     var rep = imp.filas.filter(function (r) { return r.repetida; }).length;
+    var deSemillero = compras ? 0 : imp.filas.filter(function (r) { return pareceSemillero(r.cliente); }).length;
     $('#imp-resumen').innerHTML =
+      (deSemillero ? '<span class="etq warn">Atención: ' + deSemillero + ' filas tienen como cliente a un semillero. ' +
+        'Si es un listado de compras, cancelá e importalo desde «Compras».</span>' : '') +
       '<span class="etq in">' + listas + ' listas para importar</span>' +
       (consultas ? '<span class="etq warn">' + consultas + ' para responder si corresponden a una operación anterior</span>' : '') +
       (marcadasMal ? '<span class="etq warn">' + marcadasMal + ' marcadas con datos a completar</span>' : '') +
@@ -1189,6 +1197,12 @@
       (cambios ? '<span class="etq warn">' + cambios + ' ya cargadas pero con otra cantidad</span>' : '') +
       (rep ? '<span class="etq">' + rep + ' ya cargadas antes (no se repiten)</span>' : '');
     $('#imp-confirmar').textContent = 'Importar ' + listas + ' nuevas' + (aActualizar ? ' y actualizar ' + aActualizar : '');
+  }
+
+  // El nombre incluye el de un semillero de la lista (ej.: «Advanta Semillas S.A.I.C.»).
+  function pareceSemillero(nombre) {
+    var t = norm(nombre);
+    return !!t && semilleros().some(function (sm) { var n = norm(sm); return n.length > 2 && t.indexOf(n) >= 0; });
   }
 
   // Para no llenar la pantalla de listas, solo se muestra el selector en filas que parecen semilla.
@@ -1288,7 +1302,7 @@
       var m = {
         id: nuevoId(), creado: ahora + n, clase: claseDe(tipo), tipo: tipo, doc: r.doc, fecha: r.fecha,
         clienteId: c ? c.id : '', proveedor: compras ? r.cliente : '', hibridoId: r.hibridoId, banda: r.banda, cantidad: r.cantidad,
-        precio: null, moneda: 'USD', comprobante: r.comprobante,
+        precio: r.precio, moneda: 'USD', comprobante: r.comprobante,
         obs: 'Importado de Algoritmo: ' + r.desc, ident: identDe(r)
       };
       if (grupo) m.grupo = grupo;
