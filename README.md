@@ -8,11 +8,18 @@ Página web para llevar el stock de semillas (girasol, maíz y sorgo): híbridos
 2. **Clientes**: cargalos a mano o importá un Excel con la columna *Nombre* (y opcionalmente CUIT, Localidad, Teléfono, Correo).
 3. **Compras**: existencia inicial de campaña, compras, pedidos y mercadería consignada. Suman stock. Se elige banda (1, 2, 3 o sin banda) y el precio es opcional.
 4. **Ventas**: ventas y reservas. Se busca el cliente por nombre, se elige el híbrido y la banda. Descuentan stock.
-   - **Importar ventas de Algoritmo (Excel)**: se eligen las columnas de Cliente, Descripción y Cantidad (y opcionalmente Fecha y Comprobante); la elección queda recordada.
-     La página busca en la descripción el híbrido cargado (ej.: «girasol ADV 5407 CL G2 Env. 180.000 Semillas» → ADV 5407) y en girasol define la banda:
-     G0, G1, G2 → Banda 1; G3 → Banda 2; G3E, G4 → Banda 3. Antes de guardar se muestra una vista previa para corregir.
-     Los clientes que no existen se agregan solos, y las filas ya importadas antes se saltean.
-5. **Posición comercial**: totales ingresados y salidas por híbrido y banda, filtrando por grano o por híbridos.
+   - Tipos: venta, reserva, pedido de cliente (descuentan stock) y devolución de cliente (suma stock).
+   - **Importar ventas de Algoritmo (Excel)**: se eligen las columnas de Cliente, Descripción, Cantidad y Código de operación
+     (y opcionalmente Fecha y Comprobante); la elección queda recordada.
+     - Código de operación: **FAC** y **REM** → venta; **PED** → pedido; **RDE** → devolución (suma stock).
+     - Híbrido: se busca en la descripción el híbrido cargado (ej.: «girasol ADV 5407 CL G2 Env. 180.000 Semillas» → ADV 5407).
+     - Bandas en girasol: G0, G1, G2 → Banda 1; G3 → Banda 2; G3E, G4 → Banda 3.
+     - Si llega un remito o una factura de un cliente e híbrido que ya tienen un pedido, remito o factura anterior con saldo,
+       la vista previa pregunta si corresponde a esa operación. Pedido, remitos y factura quedan vinculados como una sola
+       operación: el stock se descuenta una sola vez (lo mayor entre pedido, remitido y facturado) y se muestra el
+       **saldo a remitir** (ej.: factura 100, remito 50 → la factura queda en 100 con saldo a remitir 50).
+     - Los clientes que no existen se agregan solos, y las filas ya importadas antes se saltean.
+5. **Posición comercial**: totales ingresados, salidas (ventas, reservas, pedidos de clientes, devoluciones) y saldo a remitir por híbrido y banda, filtrando por grano o por híbridos.
 6. **Reporte de stock**: ficha de cada híbrido con todas las operaciones, el saldo y el stock final.
 7. Los reportes se pueden **imprimir / guardar en PDF** o **descargar en Excel**.
 

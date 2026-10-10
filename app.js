@@ -7,7 +7,16 @@
   var GRANOS = ['Girasol', 'Maíz', 'Sorgo'];
   var BANDAS = ['Banda 1', 'Banda 2', 'Banda 3', 'Sin banda'];
   var TIPOS_INGRESO = ['Existencia inicial campaña', 'Compra', 'Pedido', 'Mercadería consignada'];
-  var TIPOS_SALIDA = ['Venta', 'Reserva'];
+  var DEVOL = 'Devolución de cliente';
+  // En el formulario de ventas también se cargan las devoluciones (que suman stock).
+  var TIPOS_SALIDA = ['Venta', 'Reserva', 'Pedido de cliente', DEVOL];
+  // Códigos de operación de Algoritmo
+  var DOCS = {
+    FAC: { nombre: 'Factura', tipo: 'Venta' },
+    REM: { nombre: 'Remito', tipo: 'Venta' },
+    PED: { nombre: 'Pedido', tipo: 'Pedido de cliente' },
+    RDE: { nombre: 'Devolución', tipo: DEVOL }
+  };
 
   // ---------- Datos ----------
   var db = cargar();
@@ -30,6 +39,7 @@
   }
 
   function guardar() {
+    invalidar();
     try {
       localStorage.setItem(CLAVE, JSON.stringify(db));
       return true;
@@ -108,13 +118,97 @@
       lista.map(function (v) { return '<option>' + esc(v) + '</option>'; }).join('');
   }
 
+  function claseDe(tipo) { return TIPOS_INGRESO.indexOf(tipo) >= 0 || tipo === DEVOL ? 'ingreso' : 'salida'; }
+  // Las devoluciones de clientes se ven y se cargan en «Ventas».
+  function enVentas(m) { return m.clase === 'salida' || m.tipo === DEVOL; }
+
+  function movPorId(id) { return id ? db.movimientos.find(function (m) { return m.id === id; }) : null; }
+
+  // Código de la operación: el de Algoritmo, o uno equivalente para lo cargado a mano.
+  function docDe(m) {
+    if (!m) return '';
+    if (m.doc) return m.doc;
+    if (m.tipo === 'Venta') return 'FAC';
+    if (m.tipo === 'Pedido de cliente' || m.tipo === 'Reserva') return 'PED';
+    return '';
+  }
+
+  // Un pedido, sus remitos y su factura forman una sola operación (mismo «grupo»).
+  // El stock se descuenta una sola vez: lo mayor entre lo pedido, lo remitido y lo facturado.
+  function claveGrupo(m) { return m.grupo || m.id; }
+  function agrupable(m) { return m.clase === 'salida' && !!docDe(m); }
+
+  var cache = null;
+  function invalidar() { cache = null; }
+
+  function calcularGrupos() {
+    if (cache) return cache;
+    var grupos = {}, efectos = {};
+    db.movimientos.forEach(function (m) {
+      if (!agrupable(m)) return;
+      var k = claveGrupo(m);
+      (grupos[k] = grupos[k] || { miembros: [] }).miembros.push(m);
+    });
+    Object.keys(grupos).forEach(function (k) {
+      var g = grupos[k];
+      g.miembros.sort(function (a, b) { return (a.fecha || '').localeCompare(b.fecha || '') || (a.creado || 0) - (b.creado || 0); });
+      g.PED = 0; g.REM = 0; g.FAC = 0;
+      var antes = 0;
+      g.miembros.forEach(function (m) {
+        g[docDe(m)] += Number(m.cantidad || 0);
+        var ahora = Math.max(g.PED, g.REM, g.FAC);
+        efectos[m.id] = ahora - antes;
+        antes = ahora;
+      });
+      g.aRemitir = Math.max(0, Math.max(g.PED, g.FAC) - g.REM);
+      // El saldo a remitir se muestra en el primer pedido o factura de la operación.
+      var raiz = g.miembros.find(function (m) { return docDe(m) !== 'REM'; });
+      g.raizId = raiz ? raiz.id : '';
+    });
+    cache = { grupos: grupos, efectos: efectos };
+    return cache;
+  }
+
+  function grupoDe(m) { return agrupable(m) ? calcularGrupos().grupos[claveGrupo(m)] : null; }
+
+  // Bolsas que la operación mueve en el stock (lo ya contado en el pedido, remito o factura no se cuenta dos veces).
+  function efecto(m) {
+    var e = agrupable(m) ? calcularGrupos().efectos[m.id] : undefined;
+    return e === undefined ? Number(m.cantidad || 0) : e;
+  }
+
+  // Otras operaciones vinculadas a esta.
+  function hijos(m) {
+    var g = grupoDe(m);
+    return g ? g.miembros.filter(function (x) { return x.id !== m.id; }) : [];
+  }
+
+  // Saldo a remitir de la operación (null si esta fila no lo muestra).
+  function aRemitir(m) {
+    var g = grupoDe(m);
+    return g && g.raizId === m.id ? g.aRemitir : null;
+  }
+
+  function nombreDoc(m) {
+    var d = DOCS[docDe(m)];
+    return (m.doc && d ? d.nombre : m.tipo) + (m.comprobante ? ' ' + m.comprobante : '') + ' del ' + fechaTxt(m.fecha);
+  }
+
+  function textoVinculo(m) {
+    var otros = hijos(m);
+    if (!otros.length) return '';
+    var e = efecto(m), c = Number(m.cantidad || 0);
+    return 'Vinculada con ' + otros.map(nombreDoc).join(', ') +
+      (e === c ? '' : e ? ' (descuenta ' + num(e) + ' bls.; el resto ya estaba contado)' : ' (no descuenta stock: ya estaba contado)');
+  }
+
   // Stock de un híbrido (opcionalmente de una banda). Ingresos suman, salidas restan.
   function stock(hibridoId, banda, excluirId) {
     return db.movimientos.reduce(function (s, m) {
       if (m.hibridoId !== hibridoId) return s;
       if (banda && m.banda !== banda) return s;
       if (excluirId && m.id === excluirId) return s;
-      return s + (m.clase === 'ingreso' ? 1 : -1) * Number(m.cantidad || 0);
+      return s + (m.clase === 'ingreso' ? 1 : -1) * efecto(m);
     }, 0);
   }
 
@@ -457,7 +551,8 @@
     var q = norm($(ing ? '#busca-compras' : '#busca-ventas').value);
     var tipo = $(ing ? '#tipo-compras' : '#tipo-ventas').value;
     var t = $(ing ? '#tabla-compras' : '#tabla-ventas');
-    var todos = db.movimientos.filter(function (m) { return m.clase === clase; });
+    var soloRemitir = !ing && $('#solo-remitir').checked;
+    var todos = db.movimientos.filter(function (m) { return enVentas(m) === !ing; });
     if (!todos.length) {
       t.innerHTML = '<tr><td class="vacio">' + (ing ? 'Todavía no hay compras cargadas.' : 'Todavía no hay ventas ni reservas cargadas.') + '</td></tr>';
       return;
@@ -465,18 +560,23 @@
     var lista = todos.filter(function (m) {
       var h = hibrido(m.hibridoId), c = cliente(m.clienteId);
       var texto = nombreHibrido(h) + ' ' + (c ? c.nombre : '') + ' ' + (m.obs || '') + ' ' + (m.comprobante || '');
-      return (!tipo || m.tipo === tipo) && (!q || norm(texto).indexOf(q) >= 0);
+      return (!tipo || m.tipo === tipo) && (!q || norm(texto).indexOf(q) >= 0) && (!soloRemitir || aRemitir(m) > 0);
     }).sort(function (a, b) { return (b.fecha || '').localeCompare(a.fecha || '') || (b.creado || 0) - (a.creado || 0); });
 
     var cab = '<thead><tr><th>Fecha</th><th>Tipo</th>' + (ing ? '' : '<th>Cliente</th>') +
-      '<th>Grano</th><th>Semillero</th><th>Híbrido</th><th>Banda</th><th class="num">Bolsas</th><th class="num">Precio</th><th>Comprob.</th><th>Obs.</th><th class="acc"></th></tr></thead>';
-    var cols = ing ? 11 : 12;
+      '<th>Grano</th><th>Semillero</th><th>Híbrido</th><th>Banda</th><th class="num">Bolsas</th>' + (ing ? '' : '<th class="num">A remitir</th>') + '<th class="num">Precio</th><th>Comprob.</th><th>Obs.</th><th class="acc"></th></tr></thead>';
+    var cols = ing ? 11 : 13;
     t.innerHTML = cab + '<tbody>' + (lista.length ? lista.map(function (m) {
       var h = hibrido(m.hibridoId) || {}, c = cliente(m.clienteId);
-      return '<tr><td>' + fechaTxt(m.fecha) + '</td><td><span class="etq ' + (ing ? 'in' : 'out') + '">' + esc(m.tipo) + '</span></td>' +
+      var ar = aRemitir(m), vin = textoVinculo(m);
+      return '<tr><td>' + fechaTxt(m.fecha) + '</td><td><span class="etq ' + (m.clase === 'ingreso' ? 'in' : 'out') + '">' + esc(m.tipo) + '</span>' +
+        (m.doc ? ' <small>' + esc(m.doc) + '</small>' : '') + '</td>' +
         (ing ? '' : '<td>' + esc(c ? c.nombre : '(cliente borrado)') + '</td>') +
         '<td>' + esc(h.grano) + '</td><td>' + esc(h.semillero) + '</td><td><b>' + esc(h.hibrido) + '</b></td><td>' + esc(m.banda) + '</td>' +
-        '<td class="num">' + num(m.cantidad) + '</td><td class="num">' + precioTxt(m) + '</td><td>' + esc(m.comprobante) + '</td><td>' + esc(m.obs) + '</td>' +
+        '<td class="num">' + num(m.cantidad) + '</td>' +
+        (ing ? '' : '<td class="num' + (ar > 0 ? ' neg' : '') + '">' + (ar == null ? '' : num(ar)) + '</td>') +
+        '<td class="num">' + precioTxt(m) + '</td><td>' + esc(m.comprobante) + '</td>' +
+        '<td>' + (vin ? '<small class="vinc">' + esc(vin) + '</small><br>' : '') + esc(m.obs) + '</td>' +
         '<td class="acc"><button class="mini" data-edit-m="' + m.id + '">Editar</button> ' +
         '<button class="mini borrar" data-del-m="' + m.id + '">Borrar</button></td></tr>';
     }).join('') : '<tr><td colspan="' + cols + '" class="vacio">No hay coincidencias.</td></tr>') + '</tbody>';
@@ -486,14 +586,17 @@
     var clase = s === 'compras' ? 'ingreso' : 'salida';
     $('#busca-' + s).addEventListener('input', function () { renderMovs(clase); });
     $('#tipo-' + s).addEventListener('change', function () { renderMovs(clase); });
+    if (s === 'ventas') $('#solo-remitir').addEventListener('change', function () { renderMovs(clase); });
     $('#tabla-' + s).addEventListener('click', function (e) {
       var b = e.target.closest('button');
       if (!b) return;
       var m = db.movimientos.find(function (x) { return x.id === (b.dataset.editM || b.dataset.delM); });
       if (!m) return;
-      if (b.dataset.editM) abrirMov(m.clase, m);
+      if (b.dataset.editM) abrirMov(enVentas(m) ? 'salida' : 'ingreso', m);
       if (b.dataset.delM) {
-        if (!confirm('¿Borrar esta operación (' + m.tipo + ' de ' + num(m.cantidad) + ' bolsas de ' + nombreHibrido(hibrido(m.hibridoId)) + ')?')) return;
+        var nh = hijos(m).length;
+        if (!confirm('¿Borrar esta operación (' + m.tipo + ' de ' + num(m.cantidad) + ' bolsas de ' + nombreHibrido(hibrido(m.hibridoId)) + ')?' +
+          (nh ? '\n\nHay ' + nh + ' operaciones que corresponden a esta (remitos, facturas). Si la borrás, esas pasan a descontar stock por su cuenta.' : ''))) return;
         db.movimientos = db.movimientos.filter(function (x) { return x.id !== m.id; });
         guardar();
         refrescar();
@@ -523,8 +626,9 @@
     fMov.uid.value = m ? m.id : '';
     fMov.clase.value = clase;
     opciones(fMov.tipo, ing ? TIPOS_INGRESO : TIPOS_SALIDA);
-    $('#tit-mov').textContent = (m ? 'Editar ' : 'Cargar ') + (ing ? 'compra / ingreso' : 'venta o reserva');
+    $('#tit-mov').textContent = (m ? 'Editar ' : 'Cargar ') + (ing ? 'compra / ingreso' : 'venta, pedido o devolución');
     $('#bloque-cliente').style.display = ing ? 'none' : '';
+    $('#vinculo-mov').textContent = m ? textoVinculo(m) : '';
     $('#busca-hibrido-mov').value = '';
     $('#busca-cliente-mov').value = '';
     fMov.fecha.value = m ? m.fecha : hoy();
@@ -571,7 +675,7 @@
     var banda = fMov.banda.value;
     var disp = stock(hid, banda, fMov.uid.value);
     var txt = 'Stock disponible' + (banda ? ' en ' + banda : ' (todas las bandas)') + ': ' + num(disp) + ' bolsas';
-    if (fMov.clase.value === 'salida' && banda && Number(fMov.cantidad.value) > disp) {
+    if (claseDe(fMov.tipo.value) === 'salida' && banda && Number(fMov.cantidad.value) > disp) {
       p.className = 'disponible mal';
       txt += ' — la cantidad supera el stock';
     }
@@ -619,11 +723,12 @@
 
   fMov.addEventListener('submit', function (e) {
     var ing = fMov.clase.value === 'ingreso';
+    var sale = claseDe(fMov.tipo.value) === 'salida';
     if (!ing && !fMov.clienteId.value) { e.preventDefault(); aviso('Elegí un cliente.', true); return; }
     if (!fMov.hibridoId.value) { e.preventDefault(); aviso('Elegí un híbrido.', true); return; }
     var cant = Number(fMov.cantidad.value);
     if (!(cant > 0)) { e.preventDefault(); aviso('La cantidad debe ser mayor a cero.', true); return; }
-    if (!ing) {
+    if (sale) {
       var disp = stock(fMov.hibridoId.value, fMov.banda.value, fMov.uid.value);
       if (cant > disp && !confirm('Hay ' + num(disp) + ' bolsas en stock en ' + fMov.banda.value + ' y querés descontar ' + num(cant) + '.\n¿Guardar igual?')) {
         e.preventDefault();
@@ -631,7 +736,7 @@
       }
     }
     var datos = {
-      clase: fMov.clase.value,
+      clase: claseDe(fMov.tipo.value),
       tipo: fMov.tipo.value,
       fecha: fMov.fecha.value,
       clienteId: ing ? '' : fMov.clienteId.value,
@@ -651,7 +756,7 @@
       datos.id = nuevoId();
       datos.creado = Date.now();
       db.movimientos.push(datos);
-      aviso(ing ? 'Ingreso cargado: suma ' + num(cant) + ' bolsas.' : datos.tipo + ' cargada: descuenta ' + num(cant) + ' bolsas.');
+      aviso(datos.tipo + ' cargada: ' + (sale ? 'descuenta ' : 'suma ') + num(cant) + ' bolsas.');
     }
     guardar();
     refrescar();
@@ -769,13 +874,15 @@
       var porTitulo = function (k) { return guardado[k] ? titulos.indexOf(guardado[k]) : -1; };
       var col = {
         cliente: porTitulo('cliente'), descripcion: porTitulo('descripcion'), cantidad: porTitulo('cantidad'),
-        fecha: porTitulo('fecha'), comprobante: porTitulo('comprobante')
+        fecha: porTitulo('fecha'), comprobante: porTitulo('comprobante'), operacion: porTitulo('operacion')
       };
       if (col.cliente < 0) col.cliente = adivinarColumna(titulos, ['razon social', 'cliente', 'nombre', 'denominacion'], ['cod', 'cuit', 'nro', 'num']);
       if (col.descripcion < 0) col.descripcion = adivinarColumna(titulos, ['descripcion', 'articulo', 'producto', 'detalle'], ['cod']);
       if (col.cantidad < 0) col.cantidad = adivinarColumna(titulos, ['cantidad', 'cant', 'bolsas', 'unidades']);
       if (col.fecha < 0) col.fecha = adivinarColumna(titulos, ['fecha']);
       if (col.comprobante < 0) col.comprobante = adivinarColumna(titulos, ['comprobante', 'factura', 'numero', 'nro']);
+      if (col.operacion < 0) col.operacion = adivinarColumna(titulos, ['operacion', 'tipo de comprobante', 'tipo comprobante', 'tipo comp', 'cod. comp', 'tipo']);
+      if (col.operacion === col.comprobante) col.operacion = -1;
 
       var opts = '<option value="-1">— elegir —</option>' + titulos.map(function (t, i) {
         return '<option value="' + i + '">' + esc(t) + '</option>';
@@ -791,19 +898,35 @@
     }, true);
   });
 
+  var CAMPOS_IMP = ['cliente', 'descripcion', 'cantidad', 'operacion', 'fecha', 'comprobante'];
+
   function columnaElegida(k) { return Number($('#form-imp [data-col="' + k + '"]').value); }
+
+  // FAC (factura) y REM (remito) → venta; PED → pedido; RDE → devolución (suma stock).
+  function docDeTexto(txt) {
+    var t = norm(txt);
+    if (!t) return '';
+    if (/(^|[^a-z])rde([^a-z]|$)/.test(t) || t.indexOf('devol') >= 0) return 'RDE';
+    if (/(^|[^a-z])(fac|fca|fcb|fc)([^a-z]|$)/.test(t) || t.indexOf('factura') >= 0) return 'FAC';
+    if (/(^|[^a-z])rem([^a-z]|$)/.test(t) || t.indexOf('remito') >= 0) return 'REM';
+    if (/(^|[^a-z])ped([^a-z]|$)/.test(t) || t.indexOf('pedido') >= 0) return 'PED';
+    return '';
+  }
 
   function armarImportacion() {
     var c = {};
-    ['cliente', 'descripcion', 'cantidad', 'fecha', 'comprobante'].forEach(function (k) { c[k] = columnaElegida(k); });
-    var celda = function (f, k) { return c[k] >= 0 ? f[c[k]] : ''; };
+    CAMPOS_IMP.forEach(function (k) { c[k] = columnaElegida(k); });
+    var celda = function (f, k) { var v = c[k] >= 0 ? f[c[k]] : ''; return v == null ? '' : v; };
+    var porDefecto = $('#imp-tipo').value;
     imp.filas = [];
     if (c.cliente < 0 || c.descripcion < 0 || c.cantidad < 0) { renderImportacion(); return; }
     imp.datos.forEach(function (f) {
-      var cli = String(celda(f, 'cliente') == null ? '' : celda(f, 'cliente')).trim();
-      var desc = String(celda(f, 'descripcion') == null ? '' : celda(f, 'descripcion')).trim();
-      var cant = numeroAR(celda(f, 'cantidad'));
+      var cli = String(celda(f, 'cliente')).trim();
+      var desc = String(celda(f, 'descripcion')).trim();
       if (!cli && !desc) return;
+      var comp = String(celda(f, 'comprobante')).trim();
+      var doc = docDeTexto(celda(f, 'operacion')) || docDeTexto(comp);
+      var cant = numeroAR(celda(f, 'cantidad'));
       var h = detectarHibrido(desc);
       var banda = '';
       if (h && h.grano === 'Girasol') banda = bandaGirasol(desc);
@@ -811,11 +934,15 @@
       imp.filas.push({
         cliente: cli, desc: desc, cantidad: cant,
         fecha: fechaISO(celda(f, 'fecha')) || hoy(),
-        comprobante: String(celda(f, 'comprobante') == null ? '' : celda(f, 'comprobante')).trim(),
-        hibridoId: h ? h.id : '', banda: banda, auto: !!h
+        comprobante: comp, doc: doc || porDefecto, docAuto: !!doc,
+        hibridoId: h ? h.id : '', banda: banda, vinculo: ''
       });
     });
-    imp.filas.forEach(function (r) { r.repetida = yaImportada(r); r.importar = !!r.hibridoId && !r.repetida; });
+    imp.filas.forEach(function (r) {
+      if (r.doc === 'RDE' && r.cantidad < 0) r.cantidad = -r.cantidad;
+      r.repetida = yaImportada(r);
+      r.importar = !!r.hibridoId && !r.repetida;
+    });
     renderImportacion();
   }
 
@@ -828,13 +955,67 @@
     return db.movimientos.some(function (m) { return m.origen === k; });
   }
 
-  function problemaFila(r) {
+  function problemaBasico(r) {
     if (r.repetida) return 'Ya importada antes';
     if (!r.hibridoId) return 'Sin híbrido';
     if (!r.cliente) return 'Sin cliente';
     if (!(r.cantidad > 0)) return 'Cantidad inválida';
     if (!r.banda) return 'Falta banda';
     return '';
+  }
+
+  function problemaFila(r) {
+    return problemaBasico(r) || (r.candidatos && r.candidatos.length && !r.vinculo ? 'Consultar: ¿corresponde a una anterior?' : '');
+  }
+
+  // Saldo de una operación (pedido + remitos + factura) para un remito o una factura nuevos.
+  function saldoPara(doc, g) {
+    if (doc === 'REM') return Math.max(g.PED, g.FAC) - g.REM;
+    if (doc === 'FAC') return Math.max(g.PED, g.REM) - g.FAC;
+    return 0;
+  }
+
+  // Recorre las filas por fecha. Para cada remito o factura busca operaciones anteriores del mismo
+  // cliente e híbrido (guardadas o de este mismo archivo) que todavía tengan saldo, para preguntar.
+  function calcularVinculos() {
+    var bolsa = [];
+    var grupos = calcularGrupos().grupos;
+    Object.keys(grupos).forEach(function (k) {
+      var g = grupos[k], m0 = g.miembros[0], c = cliente(m0.clienteId);
+      bolsa.push({
+        clave: 'm:' + k, cli: norm(c ? c.nombre : ''), hibridoId: m0.hibridoId, PED: g.PED, REM: g.REM, FAC: g.FAC,
+        texto: g.miembros.map(nombreDoc).join(' + ')
+      });
+    });
+    var orden = imp.filas.map(function (r, i) { return i; }).sort(function (x, y) {
+      return imp.filas[x].fecha.localeCompare(imp.filas[y].fecha) || x - y;
+    });
+    orden.forEach(function (i) {
+      var r = imp.filas[i];
+      r.candidatos = [];
+      r.descuenta = r.cantidad;
+      if (!r.importar || problemaBasico(r) || r.doc === 'RDE') { r.vinculo = ''; return; }
+      if (r.doc === 'REM' || r.doc === 'FAC') {
+        r.candidatos = bolsa.filter(function (b) {
+          return b.cli === norm(r.cliente) && b.hibridoId === r.hibridoId && saldoPara(r.doc, b) > 0;
+        }).map(function (b) { return { clave: b.clave, texto: b.texto, pend: saldoPara(r.doc, b) }; });
+      } else {
+        r.vinculo = '';
+      }
+      if (r.vinculo && r.vinculo !== 'nuevo' && !r.candidatos.some(function (b) { return b.clave === r.vinculo; })) r.vinculo = '';
+      var texto = DOCS[r.doc].nombre + (r.comprobante ? ' ' + r.comprobante : '') + ' del ' + fechaTxt(r.fecha) + ' (de este archivo)';
+      if (r.vinculo && r.vinculo !== 'nuevo') {
+        var b = bolsa.find(function (x) { return x.clave === r.vinculo; });
+        var antes = Math.max(b.PED, b.REM, b.FAC);
+        b[r.doc] += r.cantidad;
+        r.descuenta = Math.max(b.PED, b.REM, b.FAC) - antes;
+        b.texto += ' + ' + texto;
+      } else {
+        var nuevo = { clave: 'i:' + i, fila: i, cli: norm(r.cliente), hibridoId: r.hibridoId, PED: 0, REM: 0, FAC: 0, texto: texto };
+        nuevo[r.doc] = r.cantidad;
+        bolsa.push(nuevo);
+      }
+    });
   }
 
   function renderImportacion() {
@@ -845,40 +1026,59 @@
       $('#imp-confirmar').textContent = 'Importar';
       return;
     }
+    calcularVinculos();
     var solo = $('#imp-solo-problemas').checked;
     var opcH = '<option value="">— no es un híbrido cargado —</option>' + ordenarHibridos(db.hibridos).map(function (h) {
       return '<option value="' + h.id + '">' + esc(h.hibrido + ' · ' + h.semillero + ' (' + h.grano + ')') + '</option>';
     }).join('');
     var opcB = '<option value="">Elegir…</option>' + BANDAS.map(function (b) { return '<option>' + b + '</option>'; }).join('');
-    var html = '<thead><tr><th></th><th>Cliente</th><th>Descripción en Algoritmo</th><th>Híbrido</th><th>Banda</th><th class="num">Bolsas</th><th>Fecha</th><th>Estado</th></tr></thead><tbody>';
+    var opcD = Object.keys(DOCS).map(function (k) { return '<option value="' + k + '">' + k + ' · ' + DOCS[k].nombre + '</option>'; }).join('');
+    var html = '<thead><tr><th></th><th>Cliente</th><th>Operación</th><th>Descripción en Algoritmo</th><th>Híbrido</th><th>Banda</th>' +
+      '<th class="num">Bolsas</th><th>Fecha</th><th>¿Corresponde a una operación anterior?</th><th>Estado</th></tr></thead><tbody>';
     imp.filas.forEach(function (r, i) {
       var prob = problemaFila(r);
       if (solo && !prob) return;
       var clienteNuevo = r.cliente && !db.clientes.some(function (c) { return norm(c.nombre) === norm(r.cliente); });
+      var vinc = '—';
+      if (r.candidatos && r.candidatos.length) {
+        var pregunta = r.doc === 'REM' ? '¿Este remito descuenta de…?' : '¿Esta factura es nueva o corresponde a…?';
+        vinc = '<select data-i="' + i + '" data-k="vinculo" class="sel-vinc' + (r.vinculo ? '' : ' falta') + '">' +
+          '<option value="">' + pregunta + '</option>' +
+          '<option value="nuevo"' + (r.vinculo === 'nuevo' ? ' selected' : '') + '>No, es nueva (descuenta stock)</option>' +
+          r.candidatos.map(function (b) {
+            return '<option value="' + b.clave + '"' + (r.vinculo === b.clave ? ' selected' : '') + '>Sí: ' + esc(b.texto) + ' · saldo ' + num(b.pend) + ' bls.</option>';
+          }).join('') + '</select>' +
+          (r.vinculo && r.vinculo !== 'nuevo' ? '<br><small>' + (r.descuenta ? 'Descuenta ' + num(r.descuenta) + ' bls. (excede el saldo)' : 'No descuenta stock (ya contado)') + '</small>' : '');
+      }
       html += '<tr class="' + (!r.importar ? 'omitida' : prob ? 'revisar' : '') + '">' +
         '<td><input type="checkbox" data-i="' + i + '" data-k="importar"' + (r.importar ? ' checked' : '') + '></td>' +
         '<td>' + esc(r.cliente) + (clienteNuevo && r.importar ? ' <span class="etq warn">cliente nuevo</span>' : '') + '</td>' +
-        '<td class="desc">' + esc(r.desc) + '</td>' +
+        '<td><select data-i="' + i + '" data-k="doc" class="sel-doc">' + opcD.replace('value="' + r.doc + '"', 'value="' + r.doc + '" selected') + '</select>' +
+          (r.docAuto ? '' : '<br><small>no se reconoció</small>') + '</td>' +
+        '<td class="desc">' + esc(r.desc) + (r.comprobante ? '<br><small>' + esc(r.comprobante) + '</small>' : '') + '</td>' +
         '<td>' + (r.hibridoId || r.elegir || pareceSemilla(r.desc)
           ? '<select data-i="' + i + '" data-k="hibridoId">' + opcH.replace('value="' + r.hibridoId + '"', 'value="' + r.hibridoId + '" selected') + '</select>'
           : '<button type="button" class="mini" data-elegir="' + i + '">Elegir híbrido</button>') + '</td>' +
         '<td><select data-i="' + i + '" data-k="banda">' + opcB.replace('<option>' + r.banda + '</option>', '<option selected>' + r.banda + '</option>') + '</select></td>' +
         '<td class="num">' + (isNaN(r.cantidad) ? '?' : num(r.cantidad)) + '</td>' +
         '<td>' + fechaTxt(r.fecha) + '</td>' +
+        '<td>' + vinc + '</td>' +
         '<td>' + (prob ? '<span class="etq warn">' + prob + '</span>' : '<span class="etq in">OK</span>') + '</td></tr>';
     });
     t.innerHTML = html + '</tbody>';
 
     var listas = imp.filas.filter(function (r) { return r.importar && !problemaFila(r); }).length;
-    var marcadasMal = imp.filas.filter(function (r) { return r.importar && problemaFila(r); }).length;
+    var consultas = imp.filas.filter(function (r) { return r.importar && !problemaBasico(r) && problemaFila(r); }).length;
+    var marcadasMal = imp.filas.filter(function (r) { return r.importar && problemaBasico(r); }).length;
     var sinH = imp.filas.filter(function (r) { return !r.hibridoId; }).length;
     var rep = imp.filas.filter(function (r) { return r.repetida; }).length;
     $('#imp-resumen').innerHTML =
       '<span class="etq in">' + listas + ' listas para importar</span>' +
+      (consultas ? '<span class="etq warn">' + consultas + ' para responder si corresponden a una operación anterior</span>' : '') +
       (marcadasMal ? '<span class="etq warn">' + marcadasMal + ' marcadas con datos a completar</span>' : '') +
       (sinH ? '<span class="etq">' + sinH + ' sin híbrido reconocido (no se importan)</span>' : '') +
       (rep ? '<span class="etq">' + rep + ' ya importadas antes</span>' : '');
-    $('#imp-confirmar').textContent = 'Importar ' + listas + ' ventas';
+    $('#imp-confirmar').textContent = 'Importar ' + listas + ' operaciones';
   }
 
   // Para no llenar la pantalla de listas, solo se muestra el selector en filas que parecen semilla.
@@ -896,6 +1096,7 @@
   });
 
   $$('#form-imp [data-col]').forEach(function (s) { s.addEventListener('change', armarImportacion); });
+  $('#imp-tipo').addEventListener('change', armarImportacion);
   $('#imp-solo-problemas').addEventListener('change', renderImportacion);
 
   $('#imp-tabla').addEventListener('change', function (e) {
@@ -909,43 +1110,60 @@
       r.importar = !!el.value;
     }
     if (el.dataset.k === 'banda') r.banda = el.value;
+    if (el.dataset.k === 'doc') { r.doc = el.value; r.docAuto = true; }
+    if (el.dataset.k === 'vinculo') r.vinculo = el.value;
     renderImportacion();
   });
 
   $('#form-imp').addEventListener('submit', function (e) {
+    calcularVinculos();
     var listas = imp.filas.filter(function (r) { return r.importar && !problemaFila(r); });
     var malas = imp.filas.filter(function (r) { return r.importar && problemaFila(r); }).length;
-    if (!listas.length) { e.preventDefault(); aviso('No hay ventas listas para importar.', true); return; }
-    if (malas && !confirm(malas + ' filas marcadas tienen datos a completar y no se van a importar. ¿Seguir con las ' + listas.length + ' que están bien?')) {
+    if (!listas.length) { e.preventDefault(); aviso('No hay operaciones listas para importar.', true); return; }
+    if (malas && !confirm(malas + ' filas marcadas tienen datos a completar o preguntas sin responder y no se van a importar. ¿Seguir con las ' + listas.length + ' que están bien?')) {
       e.preventDefault();
       return;
     }
     // Recordar qué columnas se usaron, para la próxima vez.
     var mapeo = {};
-    ['cliente', 'descripcion', 'cantidad', 'fecha', 'comprobante'].forEach(function (k) {
+    CAMPOS_IMP.forEach(function (k) {
       var i = columnaElegida(k);
       if (i >= 0) mapeo[k] = imp.titulos[i];
     });
     try { localStorage.setItem(CLAVE_MAPEO, JSON.stringify(mapeo)); } catch (err) { /* no es grave */ }
 
-    var tipo = $('#imp-tipo').value, nuevos = 0, ahora = Date.now();
-    listas.forEach(function (r, i) {
+    // Se guardan por fecha, así una fila puede corresponder a otra anterior del mismo archivo.
+    var nuevos = 0, ahora = Date.now(), idDeFila = {}, cuenta = {};
+    var orden = imp.filas.map(function (r, i) { return i; }).sort(function (x, y) {
+      return imp.filas[x].fecha.localeCompare(imp.filas[y].fecha) || x - y;
+    });
+    orden.forEach(function (i, n) {
+      var r = imp.filas[i];
+      if (!r.importar || problemaFila(r)) return;
       var c = db.clientes.find(function (x) { return norm(x.nombre) === norm(r.cliente); });
       if (!c) {
         c = { id: nuevoId(), nombre: r.cliente, cuit: '', localidad: '', telefono: '', correo: '' };
         db.clientes.push(c);
         nuevos++;
       }
-      db.movimientos.push({
-        id: nuevoId(), creado: ahora + i, clase: 'salida', tipo: tipo, fecha: r.fecha,
+      var grupo = '';
+      if (r.vinculo && r.vinculo.indexOf('m:') === 0) grupo = r.vinculo.slice(2);
+      if (r.vinculo && r.vinculo.indexOf('i:') === 0) grupo = idDeFila[r.vinculo.slice(2)] || '';
+      var tipo = DOCS[r.doc].tipo;
+      var m = {
+        id: nuevoId(), creado: ahora + n, clase: claseDe(tipo), tipo: tipo, doc: r.doc, fecha: r.fecha,
         clienteId: c.id, hibridoId: r.hibridoId, banda: r.banda, cantidad: r.cantidad,
         precio: null, moneda: 'USD', comprobante: r.comprobante,
         obs: 'Importado de Algoritmo: ' + r.desc, origen: claveFila(r)
-      });
+      };
+      if (grupo) m.grupo = grupo;
+      db.movimientos.push(m);
+      idDeFila[i] = claveGrupo(m);
+      cuenta[DOCS[r.doc].nombre] = (cuenta[DOCS[r.doc].nombre] || 0) + 1;
     });
     guardar();
     refrescar();
-    alert('Se importaron ' + listas.length + ' ' + (tipo === 'Venta' ? 'ventas' : 'reservas') + '.' +
+    alert('Se importaron ' + listas.length + ' operaciones:\n' + Object.keys(cuenta).map(function (k) { return '· ' + k + ': ' + cuenta[k]; }).join('\n') +
       (nuevos ? '\nSe agregaron ' + nuevos + ' clientes nuevos.' : ''));
   });
 
@@ -1022,7 +1240,9 @@
   }
 
   // ---------- Posición comercial ----------
-  var COLS_POS = ['Exist. inicial', 'Compras', 'Pedidos', 'Consignada', 'Total ingresado', 'Ventas', 'Reservas', 'Total salidas', 'Saldo'];
+  var COLS_POS = ['Exist. inicial', 'Compras', 'Pedidos', 'Consignada', 'Total ingresado', 'Ventas', 'Reservas', 'Pedidos clientes',
+    'Devoluciones', 'Total salidas', 'Saldo', 'Saldo a remitir'];
+  var COL_SALDO = 10;
   var datosPosicion = null;
 
   function calcularPosicion() {
@@ -1034,13 +1254,20 @@
       if (!bandas.length) bandas = [f.banda || '—'];
       bandas.forEach(function (b) {
         var ms = movs.filter(function (m) { return m.banda === b; });
-        var sum = function (tipo) {
-          return ms.filter(function (m) { return m.tipo === tipo; }).reduce(function (s, m) { return s + Number(m.cantidad); }, 0);
+        // Un pedido que ya tiene remito o factura se cuenta como venta.
+        var tipoPos = function (m) {
+          var g = m.tipo === 'Pedido de cliente' ? grupoDe(m) : null;
+          return g && (g.REM || g.FAC) ? 'Venta' : m.tipo;
         };
-        var v = [sum('Existencia inicial campaña'), sum('Compra'), sum('Pedido'), sum('Mercadería consignada')];
+        var sum = function (clase, tipo) {
+          return ms.filter(function (m) { return m.clase === clase && tipoPos(m) === tipo; }).reduce(function (s, m) { return s + efecto(m); }, 0);
+        };
+        var v = [sum('ingreso', 'Existencia inicial campaña'), sum('ingreso', 'Compra'), sum('ingreso', 'Pedido'), sum('ingreso', 'Mercadería consignada')];
         var ingr = v[0] + v[1] + v[2] + v[3];
-        var ven = sum('Venta'), res = sum('Reserva');
-        filas.push({ h: h, banda: b, v: v.concat([ingr, ven, res, ven + res, ingr - ven - res]) });
+        var ven = sum('salida', 'Venta'), res = sum('salida', 'Reserva'), ped = sum('salida', 'Pedido de cliente'), dev = sum('ingreso', DEVOL);
+        var sal = ven + res + ped - dev;
+        var arem = ms.reduce(function (s, m) { var a = aRemitir(m); return s + (a > 0 ? a : 0); }, 0);
+        filas.push({ h: h, banda: b, v: v.concat([ingr, ven, res, ped, dev, sal, ingr - sal, arem]) });
       });
     });
     return filas;
@@ -1058,7 +1285,7 @@
     var cab = '<thead><tr><th>Semillero</th><th>Híbrido</th><th>Banda</th>' +
       COLS_POS.map(function (c) { return '<th class="num">' + c + '</th>'; }).join('') + '</tr></thead>';
     var celdas = function (v) {
-      return v.map(function (n, i) { return '<td class="num' + (i === 8 && n < 0 ? ' neg' : '') + '">' + num(n) + '</td>'; }).join('');
+      return v.map(function (n, i) { return '<td class="num' + (i === COL_SALDO && n < 0 ? ' neg' : '') + '">' + num(n) + '</td>'; }).join('');
     };
     var html = '<p class="meta">' + esc(descripcionFiltro(filtros.posicion)) + ' · Cantidades en bolsas</p>';
     GRANOS.forEach(function (g) {
@@ -1097,11 +1324,16 @@
       var movs = db.movimientos.filter(function (m) { return m.hibridoId === h.id && (!f.banda || m.banda === f.banda); })
         .sort(function (a, b) { return (a.fecha || '').localeCompare(b.fecha || '') || (a.creado || 0) - (b.creado || 0); })
         .map(function (m) {
-          var ing = m.clase === 'ingreso' ? Number(m.cantidad) : 0;
-          var sal = m.clase === 'salida' ? Number(m.cantidad) : 0;
+          var ing = m.clase === 'ingreso' ? efecto(m) : 0;
+          var sal = m.clase === 'salida' ? efecto(m) : 0;
           saldo += ing - sal;
           var c = cliente(m.clienteId);
-          return { m: m, quien: m.clase === 'ingreso' ? h.semillero : (c ? c.nombre : '(cliente borrado)'), ing: ing, sal: sal, saldo: saldo };
+          var notas = [textoVinculo(m)], ar = aRemitir(m);
+          if (ar != null) notas.push('Saldo a remitir: ' + num(ar) + ' bls.');
+          return {
+            m: m, quien: m.clienteId ? (c ? c.nombre : '(cliente borrado)') : h.semillero, ing: ing, sal: sal, saldo: saldo,
+            nota: notas.filter(Boolean).join(' · ')
+          };
         });
       var porBanda = BANDAS.map(function (b) {
         var ms = movs.filter(function (x) { return x.m.banda === b; });
@@ -1131,11 +1363,12 @@
           html += '<div class="tabla-cont"><table><thead><tr><th>Fecha</th><th>Operación</th><th>Proveedor / Cliente</th><th>Banda</th>' +
             '<th class="num">Ingreso</th><th class="num">Salida</th><th class="num">Saldo</th><th class="num">Precio</th><th>Comprob.</th><th>Obs.</th></tr></thead><tbody>' +
             x.movs.map(function (r) {
-              return '<tr><td>' + fechaTxt(r.m.fecha) + '</td><td><span class="etq ' + (r.ing ? 'in' : 'out') + '">' + esc(r.m.tipo) + '</span></td>' +
+              return '<tr><td>' + fechaTxt(r.m.fecha) + '</td><td><span class="etq ' + (r.m.clase === 'ingreso' ? 'in' : 'out') + '">' + esc(r.m.tipo) + '</span>' +
+                (r.m.doc ? ' <small>' + esc(r.m.doc) + '</small>' : '') + '</td>' +
                 '<td>' + esc(r.quien) + '</td><td>' + esc(r.m.banda) + '</td>' +
-                '<td class="num">' + (r.ing ? num(r.ing) : '') + '</td><td class="num">' + (r.sal ? num(r.sal) : '') + '</td>' +
+                '<td class="num">' + (r.m.clase === 'ingreso' ? num(r.ing) : '') + '</td><td class="num">' + (r.m.clase === 'salida' ? num(r.sal) : '') + '</td>' +
                 '<td class="num' + (r.saldo < 0 ? ' neg' : '') + '">' + num(r.saldo) + '</td><td class="num">' + precioTxt(r.m) + '</td>' +
-                '<td>' + esc(r.m.comprobante) + '</td><td>' + esc(r.m.obs) + '</td></tr>';
+                '<td>' + esc(r.m.comprobante) + '</td><td>' + (r.nota ? '<small class="vinc">' + esc(r.nota) + '</small><br>' : '') + esc(r.m.obs) + '</td></tr>';
             }).join('') +
             '<tr class="total"><td colspan="4">Stock final</td><td class="num">' + num(x.movs.reduce(function (s, r) { return s + r.ing; }, 0)) +
             '</td><td class="num">' + num(x.movs.reduce(function (s, r) { return s + r.sal; }, 0)) +
@@ -1159,12 +1392,12 @@
     var fichas = datosFicha || calcularFichas();
     if (!fichas.length) { aviso('No hay datos para exportar.', true); return; }
     var aoa = [['Reporte de stock — MORERO Semillas y Cereales S.A.'], [descripcionFiltro(filtros.reporte)], [],
-      ['Grano', 'Semillero', 'Híbrido', 'Fecha', 'Operación', 'Proveedor / Cliente', 'Banda', 'Ingreso', 'Salida', 'Saldo', 'Precio', 'Moneda', 'Comprobante', 'Observaciones']];
+      ['Grano', 'Semillero', 'Híbrido', 'Fecha', 'Operación', 'Proveedor / Cliente', 'Banda', 'Ingreso', 'Salida', 'Saldo', 'Precio', 'Moneda', 'Comprobante', 'Vínculo / saldo a remitir', 'Observaciones']];
     fichas.forEach(function (x) {
       x.movs.forEach(function (r) {
-        aoa.push([x.h.grano, x.h.semillero, x.h.hibrido, fechaTxt(r.m.fecha), r.m.tipo, r.quien, r.m.banda,
-          r.ing || '', r.sal || '', r.saldo, r.m.precio == null ? '' : r.m.precio, r.m.precio == null ? '' : (r.m.moneda === 'ARS' ? '$' : 'US$'),
-          r.m.comprobante || '', r.m.obs || '']);
+        aoa.push([x.h.grano, x.h.semillero, x.h.hibrido, fechaTxt(r.m.fecha), r.m.tipo + (r.m.doc ? ' ' + r.m.doc : ''), r.quien, r.m.banda,
+          r.m.clase === 'ingreso' ? r.ing : '', r.m.clase === 'salida' ? r.sal : '', r.saldo, r.m.precio == null ? '' : r.m.precio, r.m.precio == null ? '' : (r.m.moneda === 'ARS' ? '$' : 'US$'),
+          r.m.comprobante || '', r.nota, r.m.obs || '']);
       });
       aoa.push([x.h.grano, x.h.semillero, x.h.hibrido, '', 'STOCK FINAL', '', '', '', '', x.saldo]);
       aoa.push([]);

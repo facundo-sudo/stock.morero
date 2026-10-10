@@ -259,6 +259,10 @@ dialog label.chk-linea { flex-direction: row; font-weight: 400; }
 .imp-tabla tr.revisar td { background: #fff6e5; }
 .imp-tabla tr.omitida td { color: #9a9a9e; }
 .imp-tabla tr.omitida td.desc { text-decoration: line-through; }
+.imp-tabla select.sel-vinc { min-width: 260px; }
+.imp-tabla select.sel-vinc.falta { border-color: #d89a00; background: #fff6e5; }
+.imp-tabla select.sel-doc { min-width: 140px; }
+small.vinc { color: var(--bordo-osc); }
 .etq.warn { background: #fff0cc; color: #8a5a00; }
 dialog::backdrop { background: rgba(30,30,32,.55); }
 dialog form { padding: 18px; display: flex; flex-direction: column; gap: 10px; }

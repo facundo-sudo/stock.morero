@@ -105,11 +105,12 @@
           <input type="file" id="imp-ventas" accept=".xlsx,.xls,.csv" hidden>
         </label>
       </div>
-      <p class="ayuda">Las ventas y las reservas descuentan stock. Al importar desde Algoritmo, la página busca en la descripción el híbrido cargado (por ejemplo «ADV 5407») y, en girasol, la banda según la categoría: G0, G1 y G2 → Banda 1; G3 → Banda 2; G3E y G4 → Banda 3.</p>
+      <p class="ayuda">Las ventas, reservas y pedidos descuentan stock; las devoluciones lo suman. Al importar desde Algoritmo: FAC y REM se toman como venta, PED como pedido y RDE como devolución. La página busca en la descripción el híbrido cargado (por ejemplo «ADV 5407») y, en girasol, la banda: G0, G1 y G2 → Banda 1; G3 → Banda 2; G3E y G4 → Banda 3. Si un remito o factura es del mismo cliente e híbrido que una operación anterior, pregunta si corresponde a esa, para no descontar dos veces y llevar el saldo a remitir.</p>
       <div class="filtros">
         <input type="search" id="busca-ventas" placeholder="Buscar cliente o híbrido…">
         <select id="tipo-ventas"><option value="">Todos los tipos</option></select>
       </div>
+      <label class="chk-linea"><input type="checkbox" id="solo-remitir"> Mostrar solo facturas y pedidos con saldo a remitir</label>
       <div class="tabla-cont"><table id="tabla-ventas"></table></div>
     </section>
 
@@ -251,6 +252,7 @@
         </label>
       </div>
       <p id="disp-mov" class="disponible"></p>
+      <p id="vinculo-mov" class="disponible"></p>
 
       <div class="dos">
         <label>Precio por bolsa <small>(opcional)</small>
@@ -289,8 +291,14 @@
           <label>Cantidad (bolsas) <select data-col="cantidad" required></select></label>
           <label>Fecha <small>(opcional)</small> <select data-col="fecha"></select></label>
           <label>N° de comprobante <small>(opcional)</small> <select data-col="comprobante"></select></label>
-          <label>Importar como
-            <select id="imp-tipo"><option>Venta</option><option>Reserva</option></select>
+          <label>Código de operación <small>(FAC, REM, PED, RDE)</small> <select data-col="operacion"></select></label>
+          <label>Si no se reconoce la operación, tomar como
+            <select id="imp-tipo">
+              <option value="FAC">FAC · Factura (venta)</option>
+              <option value="REM">REM · Remito (venta)</option>
+              <option value="PED">PED · Pedido</option>
+              <option value="RDE">RDE · Devolución (suma stock)</option>
+            </select>
           </label>
         </div>
       </fieldset>
