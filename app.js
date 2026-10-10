@@ -1535,21 +1535,39 @@
     return filas;
   }
 
+  // Opción «solo híbridos que no estén en cero» (se recuerda en este navegador).
+  var CLAVE_SIN_CEROS = 'morero_posicion_sin_ceros';
+  try { $('#sin-ceros-posicion').checked = localStorage.getItem(CLAVE_SIN_CEROS) === '1'; } catch (err) { /* no es grave */ }
+  $('#sin-ceros-posicion').addEventListener('change', function () {
+    try { localStorage.setItem(CLAVE_SIN_CEROS, this.checked ? '1' : '0'); } catch (err) { /* no es grave */ }
+    if ($('#out-posicion').innerHTML) $('#gen-posicion').click();
+  });
+  function sinCeros() { return $('#sin-ceros-posicion').checked; }
+  // En cero: sin stock y sin nada pendiente de recibir ni de remitir.
+  function noEnCero(f) { return f.v[COL_SALDO] !== 0 || f.v[COL_SALDO + 1] !== 0 || f.v[COL_SALDO + 2] !== 0; }
+
   function sumar(filas) {
     return COLS_POS.map(function (_, i) { return filas.reduce(function (s, f) { return s + f.v[i]; }, 0); });
   }
 
   $('#gen-posicion').addEventListener('click', function () {
     var filas = calcularPosicion();
+    var ocultas = filas.length;
+    if (sinCeros()) filas = filas.filter(noEnCero);
+    ocultas -= filas.length;
     datosPosicion = filas;
     var out = $('#out-posicion');
-    if (!filas.length) { out.innerHTML = '<p class="vacio">No hay híbridos para ese filtro.</p>'; return; }
+    if (!filas.length) {
+      out.innerHTML = '<p class="vacio">' + (ocultas ? 'Todos los híbridos de ese filtro están en cero.' : 'No hay híbridos para ese filtro.') + '</p>';
+      return;
+    }
     var cab = '<thead><tr><th>Semillero</th><th>Híbrido</th><th>Banda</th>' +
       COLS_POS.map(function (c) { return '<th class="num">' + c + '</th>'; }).join('') + '</tr></thead>';
     var celdas = function (v) {
       return v.map(function (n, i) { return '<td class="num' + (i === COL_SALDO && n < 0 ? ' neg' : '') + '">' + num(n) + '</td>'; }).join('');
     };
-    var html = '<p class="meta">' + esc(descripcionFiltro(filtros.posicion)) + ' · Cantidades en bolsas</p>';
+    var html = '<p class="meta">' + esc(descripcionFiltro(filtros.posicion)) + (sinCeros() ? ' · Sin híbridos en cero' : '') +
+      ' · Cantidades en bolsas' + (ocultas ? ' · ' + ocultas + ' filas en cero ocultas' : '') + '</p>';
     GRANOS.forEach(function (g) {
       var fg = filas.filter(function (f) { return f.h.grano === g; });
       if (!fg.length) return;
@@ -1563,9 +1581,9 @@
   });
 
   $('#xls-posicion').addEventListener('click', function () {
-    var filas = datosPosicion || calcularPosicion();
+    var filas = datosPosicion || calcularPosicion().filter(function (f) { return !sinCeros() || noEnCero(f); });
     if (!filas.length) { aviso('No hay datos para exportar.', true); return; }
-    var aoa = [['Posición comercial — MORERO Semillas y Cereales S.A.'], [descripcionFiltro(filtros.posicion)], [],
+    var aoa = [['Posición comercial — MORERO Semillas y Cereales S.A.'], [descripcionFiltro(filtros.posicion) + (sinCeros() ? ' · Sin híbridos en cero' : '')], [],
       ['Grano', 'Semillero', 'Híbrido', 'Banda'].concat(COLS_POS)];
     GRANOS.forEach(function (g) {
       var fg = filas.filter(function (f) { return f.h.grano === g; });

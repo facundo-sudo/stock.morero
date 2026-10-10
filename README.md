@@ -36,7 +36,7 @@ Página web para llevar el stock de semillas (girasol, maíz y sorgo): híbridos
        (cliente o proveedor), «Descripción», «Cantidad», «Código Comprobante», «Comprobante», «Fecha Comprobante»
        y, opcional, «PRECIO» (precio por bolsa en US$). Se reconocen solas.
      - Si en ventas el cliente es un semillero de la lista, avisa que puede ser un listado de compras.
-5. **Posición comercial**: totales ingresados, salidas (ventas, reservas, pedidos de clientes, devoluciones) y saldo a remitir por híbrido y banda, filtrando por grano o por híbridos.
+5. **Posición comercial**: totales ingresados, salidas (ventas, reservas, pedidos de clientes, devoluciones), saldos a recibir y a remitir por híbrido y banda, filtrando por grano o por híbridos. Opción para mostrar solo los híbridos que no están en cero (saldo, a recibir y a remitir en 0).
 6. **Reporte de stock**: dos formatos a elegir:
    - **Con detalle de movimientos**: ficha de cada híbrido con todas las operaciones, el saldo y el stock final.
    - **Solo totales**: por híbrido y banda, total ingresado, total salido, saldo y saldos a recibir / a remitir, con total por grano y general.
