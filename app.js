@@ -186,7 +186,9 @@
   // Saldo a remitir de la operación (null si esta fila no lo muestra).
   function aRemitir(m) {
     var g = grupoDe(m);
-    return g && g.raizId === m.id ? g.aRemitir : null;
+    // Solo para operaciones que vienen de Algoritmo (con remitos); lo cargado a mano no lleva saldo a remitir.
+    if (!g || g.raizId !== m.id || !g.miembros.some(function (x) { return x.doc; })) return null;
+    return g.aRemitir;
   }
 
   function nombreDoc(m) {
@@ -415,7 +417,7 @@
     var r = new FileReader();
     r.onload = function () {
       try {
-        var libro = XLSX.read(new Uint8Array(r.result), { type: 'array', cellDates: !!crudo });
+        var libro = XLSX.read(new Uint8Array(r.result), { type: 'array' });
         var hoja = libro.Sheets[libro.SheetNames[0]];
         var filas = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: '', raw: !!crudo });
         listo(filas.filter(function (f) { return f.some(function (c) { return String(c).trim() !== ''; }); }));
@@ -823,6 +825,11 @@
   }
 
   function fechaISO(v) {
+    // Fecha guardada como número de Excel (se lee sin pasar por la zona horaria).
+    if (typeof v === 'number' && v > 20000 && v < 80000) {
+      var d = XLSX.SSF.parse_date_code(v);
+      if (d) return d.y + '-' + String(d.m).padStart(2, '0') + '-' + String(d.d).padStart(2, '0');
+    }
     if (v instanceof Date && !isNaN(v)) {
       return v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0');
     }
@@ -845,8 +852,13 @@
     return mejor;
   }
 
+  // Primero busca un título exactamente igual; si no hay, uno que contenga la palabra.
   function adivinarColumna(titulos, palabras, evitar) {
     var t = titulos.map(norm);
+    for (var q = 0; q < palabras.length; q++) {
+      var exacto = t.indexOf(palabras[q]);
+      if (exacto >= 0) return exacto;
+    }
     for (var p = 0; p < palabras.length; p++) {
       var i = t.findIndex(function (x) {
         return x.indexOf(palabras[p]) >= 0 && !(evitar || []).some(function (e) { return x.indexOf(e) >= 0; });
@@ -876,12 +888,15 @@
         cliente: porTitulo('cliente'), descripcion: porTitulo('descripcion'), cantidad: porTitulo('cantidad'),
         fecha: porTitulo('fecha'), comprobante: porTitulo('comprobante'), operacion: porTitulo('operacion')
       };
-      if (col.cliente < 0) col.cliente = adivinarColumna(titulos, ['razon social', 'cliente', 'nombre', 'denominacion'], ['cod', 'cuit', 'nro', 'num']);
+      if (col.cliente < 0) col.cliente = adivinarColumna(titulos, ['nombre del productor', 'productor', 'razon social', 'cliente', 'nombre', 'denominacion'],
+        ['cod', 'cuit', 'nro', 'num', 'calle', 'piso', 'depto', 'postal', 'localidad', 'provincia', 'departamento', 'vendedor', 'secundario']);
       if (col.descripcion < 0) col.descripcion = adivinarColumna(titulos, ['descripcion', 'articulo', 'producto', 'detalle'], ['cod']);
       if (col.cantidad < 0) col.cantidad = adivinarColumna(titulos, ['cantidad', 'cant', 'bolsas', 'unidades']);
-      if (col.fecha < 0) col.fecha = adivinarColumna(titulos, ['fecha']);
-      if (col.comprobante < 0) col.comprobante = adivinarColumna(titulos, ['comprobante', 'factura', 'numero', 'nro']);
-      if (col.operacion < 0) col.operacion = adivinarColumna(titulos, ['operacion', 'tipo de comprobante', 'tipo comprobante', 'tipo comp', 'cod. comp', 'tipo']);
+      if (col.fecha < 0) col.fecha = adivinarColumna(titulos, ['fecha comprobante', 'fecha'], ['vencimiento']);
+      if (col.comprobante < 0) col.comprobante = adivinarColumna(titulos, ['comprobante', 'numero de comprobante', 'factura', 'numero', 'nro'],
+        ['codigo', 'cod.', 'sucursal', 'externo', 'fecha']);
+      if (col.operacion < 0) col.operacion = adivinarColumna(titulos, ['codigo comprobante', 'cod. comprobante', 'operacion', 'tipo de comprobante', 'tipo comprobante', 'tipo comp'],
+        ['externo', 'entidad', 'articulo', 'cambio']);
       if (col.operacion === col.comprobante) col.operacion = -1;
 
       var opts = '<option value="-1">— elegir —</option>' + titulos.map(function (t, i) {
@@ -938,25 +953,51 @@
         hibridoId: h ? h.id : '', banda: banda, vinculo: ''
       });
     });
+    // Si el mismo renglón aparece repetido en un comprobante, se numera (1.º, 2.º…) para distinguirlos.
+    var vistas = {};
     imp.filas.forEach(function (r) {
       if (r.doc === 'RDE' && r.cantidad < 0) r.cantidad = -r.cantidad;
-      r.repetida = yaImportada(r);
-      r.importar = !!r.hibridoId && !r.repetida;
+      var base = identBase(r);
+      r.ordinal = vistas[base] = (vistas[base] || 0) + 1;
     });
+    revisarCargadas();
+    imp.filas.forEach(function (r) { r.importar = !!r.hibridoId && !r.repetida; });
     renderImportacion();
   }
 
-  function claveFila(r) {
-    return [norm(r.cliente), norm(r.desc), r.cantidad, r.fecha, norm(r.comprobante)].join('|');
+  // Identifica un renglón de Algoritmo sin mirar la cantidad: operación + comprobante + cliente + descripción.
+  function identBase(r) {
+    return [r.doc, norm(r.comprobante), norm(r.cliente), norm(r.desc), r.comprobante ? '' : r.fecha].join('|');
   }
+  function identDe(r) { return identBase(r) + '|' + r.ordinal; }
 
-  function yaImportada(r) {
-    var k = claveFila(r);
-    return db.movimientos.some(function (m) { return m.origen === k; });
+  // Busca si cada renglón ya está cargado: por su identificación, o (para lo cargado a mano)
+  // por el mismo número de comprobante, cliente e híbrido.
+  function revisarCargadas() {
+    var usados = {};
+    imp.filas.forEach(function (r) {
+      var id = identDe(r);
+      var m = db.movimientos.find(function (x) { return x.ident === id && !usados[x.id]; });
+      if (!m && r.comprobante && r.hibridoId) {
+        var clase = claseDe(DOCS[r.doc].tipo);
+        m = db.movimientos.find(function (x) {
+          var c = cliente(x.clienteId);
+          return !x.ident && !usados[x.id] && x.clase === clase && x.hibridoId === r.hibridoId &&
+            norm(x.comprobante) === norm(r.comprobante) && c && norm(c.nombre) === norm(r.cliente);
+        });
+      }
+      r.existenteId = m ? m.id : '';
+      r.repetida = false;
+      r.cambio = null;
+      if (!m) return;
+      usados[m.id] = true;
+      if (Number(m.cantidad) === r.cantidad || m.cantIgnorada === r.cantidad) r.repetida = true;
+      else r.cambio = { antes: Number(m.cantidad) };
+    });
   }
 
   function problemaBasico(r) {
-    if (r.repetida) return 'Ya importada antes';
+    if (r.repetida) return 'Ya cargada';
     if (!r.hibridoId) return 'Sin híbrido';
     if (!r.cliente) return 'Sin cliente';
     if (!(r.cantidad > 0)) return 'Cantidad inválida';
@@ -965,6 +1006,7 @@
   }
 
   function problemaFila(r) {
+    if (r.cambio) return problemaBasico(r) || (r.accion ? '' : 'Cambió la cantidad: elegir');
     return problemaBasico(r) || (r.candidatos && r.candidatos.length && !r.vinculo ? 'Consultar: ¿corresponde a una anterior?' : '');
   }
 
@@ -994,7 +1036,7 @@
       var r = imp.filas[i];
       r.candidatos = [];
       r.descuenta = r.cantidad;
-      if (!r.importar || problemaBasico(r) || r.doc === 'RDE') { r.vinculo = ''; return; }
+      if (!r.importar || problemaBasico(r) || r.doc === 'RDE' || r.existenteId) { r.vinculo = ''; return; }
       if (r.doc === 'REM' || r.doc === 'FAC') {
         r.candidatos = bolsa.filter(function (b) {
           return b.cli === norm(r.cliente) && b.hibridoId === r.hibridoId && saldoPara(r.doc, b) > 0;
@@ -1040,7 +1082,14 @@
       if (solo && !prob) return;
       var clienteNuevo = r.cliente && !db.clientes.some(function (c) { return norm(c.nombre) === norm(r.cliente); });
       var vinc = '—';
-      if (r.candidatos && r.candidatos.length) {
+      if (r.repetida) vinc = '<small>Ya está cargada con la misma cantidad; no se vuelve a cargar.</small>';
+      if (r.cambio) {
+        vinc = '<small class="vinc">Ya estaba cargada con ' + num(r.cambio.antes) + ' bls.; ahora dice ' + num(r.cantidad) + '.</small><br>' +
+          '<select data-i="' + i + '" data-k="accion" class="sel-vinc' + (r.accion ? '' : ' falta') + '">' +
+          '<option value="">¿Qué hago?</option>' +
+          '<option value="actualizar"' + (r.accion === 'actualizar' ? ' selected' : '') + '>Actualizar a ' + num(r.cantidad) + ' bls.</option>' +
+          '<option value="dejar"' + (r.accion === 'dejar' ? ' selected' : '') + '>Dejar en ' + num(r.cambio.antes) + ' bls.</option></select>';
+      } else if (r.candidatos && r.candidatos.length) {
         var pregunta = r.doc === 'REM' ? '¿Este remito descuenta de…?' : '¿Esta factura es nueva o corresponde a…?';
         vinc = '<select data-i="' + i + '" data-k="vinculo" class="sel-vinc' + (r.vinculo ? '' : ' falta') + '">' +
           '<option value="">' + pregunta + '</option>' +
@@ -1067,8 +1116,10 @@
     });
     t.innerHTML = html + '</tbody>';
 
-    var listas = imp.filas.filter(function (r) { return r.importar && !problemaFila(r); }).length;
-    var consultas = imp.filas.filter(function (r) { return r.importar && !problemaBasico(r) && problemaFila(r); }).length;
+    var listas = imp.filas.filter(function (r) { return r.importar && !problemaFila(r) && !r.cambio; }).length;
+    var cambios = imp.filas.filter(function (r) { return r.importar && r.cambio; }).length;
+    var aActualizar = imp.filas.filter(function (r) { return r.importar && r.cambio && r.accion === 'actualizar' && !problemaBasico(r); }).length;
+    var consultas = imp.filas.filter(function (r) { return r.importar && !r.cambio && !problemaBasico(r) && problemaFila(r); }).length;
     var marcadasMal = imp.filas.filter(function (r) { return r.importar && problemaBasico(r); }).length;
     var sinH = imp.filas.filter(function (r) { return !r.hibridoId; }).length;
     var rep = imp.filas.filter(function (r) { return r.repetida; }).length;
@@ -1077,8 +1128,9 @@
       (consultas ? '<span class="etq warn">' + consultas + ' para responder si corresponden a una operación anterior</span>' : '') +
       (marcadasMal ? '<span class="etq warn">' + marcadasMal + ' marcadas con datos a completar</span>' : '') +
       (sinH ? '<span class="etq">' + sinH + ' sin híbrido reconocido (no se importan)</span>' : '') +
-      (rep ? '<span class="etq">' + rep + ' ya importadas antes</span>' : '');
-    $('#imp-confirmar').textContent = 'Importar ' + listas + ' operaciones';
+      (cambios ? '<span class="etq warn">' + cambios + ' ya cargadas pero con otra cantidad</span>' : '') +
+      (rep ? '<span class="etq">' + rep + ' ya cargadas antes (no se repiten)</span>' : '');
+    $('#imp-confirmar').textContent = 'Importar ' + listas + ' nuevas' + (aActualizar ? ' y actualizar ' + aActualizar : '');
   }
 
   // Para no llenar la pantalla de listas, solo se muestra el selector en filas que parecen semilla.
@@ -1099,6 +1151,20 @@
   $('#imp-tipo').addEventListener('change', armarImportacion);
   $('#imp-solo-problemas').addEventListener('change', renderImportacion);
 
+  // Contesta «Sí» en las filas que tienen una sola operación anterior posible.
+  $('#imp-auto').addEventListener('click', function () {
+    var hechas = 0;
+    for (var vuelta = 0; vuelta < imp.filas.length; vuelta++) {
+      calcularVinculos();
+      var r = imp.filas.find(function (x) { return x.candidatos && x.candidatos.length === 1 && !x.vinculo; });
+      if (!r) break;
+      r.vinculo = r.candidatos[0].clave;
+      hechas++;
+    }
+    renderImportacion();
+    aviso(hechas ? 'Se respondió «Sí» en ' + hechas + ' filas. Revisalas antes de importar.' : 'No hay filas con una sola opción para responder.');
+  });
+
   $('#imp-tabla').addEventListener('change', function (e) {
     var el = e.target, r = imp.filas[Number(el.dataset.i)];
     if (!r) return;
@@ -1111,16 +1177,26 @@
     }
     if (el.dataset.k === 'banda') r.banda = el.value;
     if (el.dataset.k === 'doc') { r.doc = el.value; r.docAuto = true; }
+    if (el.dataset.k === 'accion') r.accion = el.value;
+    if (el.dataset.k === 'doc' || el.dataset.k === 'hibridoId') {
+      revisarCargadas();
+      if (r.repetida) r.importar = false;
+    }
     if (el.dataset.k === 'vinculo') r.vinculo = el.value;
     renderImportacion();
   });
 
   $('#form-imp').addEventListener('submit', function (e) {
     calcularVinculos();
-    var listas = imp.filas.filter(function (r) { return r.importar && !problemaFila(r); });
+    var listas = imp.filas.filter(function (r) { return r.importar && !problemaFila(r) && !r.cambio; });
+    var actualizar = imp.filas.filter(function (r) { return r.importar && r.cambio && !problemaFila(r) && r.accion === 'actualizar'; });
     var malas = imp.filas.filter(function (r) { return r.importar && problemaFila(r); }).length;
-    if (!listas.length) { e.preventDefault(); aviso('No hay operaciones listas para importar.', true); return; }
-    if (malas && !confirm(malas + ' filas marcadas tienen datos a completar o preguntas sin responder y no se van a importar. ¿Seguir con las ' + listas.length + ' que están bien?')) {
+    if (!listas.length && !actualizar.length) {
+      e.preventDefault();
+      aviso(malas ? 'Faltan datos o respuestas en las filas marcadas.' : 'No hay operaciones nuevas para importar.', true);
+      return;
+    }
+    if (malas && !confirm(malas + ' filas marcadas tienen datos a completar o preguntas sin responder y no se van a importar. ¿Seguir con las que están bien?')) {
       e.preventDefault();
       return;
     }
@@ -1139,7 +1215,7 @@
     });
     orden.forEach(function (i, n) {
       var r = imp.filas[i];
-      if (!r.importar || problemaFila(r)) return;
+      if (!r.importar || problemaFila(r) || r.cambio) return;
       var c = db.clientes.find(function (x) { return norm(x.nombre) === norm(r.cliente); });
       if (!c) {
         c = { id: nuevoId(), nombre: r.cliente, cuit: '', localidad: '', telefono: '', correo: '' };
@@ -1154,16 +1230,30 @@
         id: nuevoId(), creado: ahora + n, clase: claseDe(tipo), tipo: tipo, doc: r.doc, fecha: r.fecha,
         clienteId: c.id, hibridoId: r.hibridoId, banda: r.banda, cantidad: r.cantidad,
         precio: null, moneda: 'USD', comprobante: r.comprobante,
-        obs: 'Importado de Algoritmo: ' + r.desc, origen: claveFila(r)
+        obs: 'Importado de Algoritmo: ' + r.desc, ident: identDe(r)
       };
       if (grupo) m.grupo = grupo;
       db.movimientos.push(m);
       idDeFila[i] = claveGrupo(m);
       cuenta[DOCS[r.doc].nombre] = (cuenta[DOCS[r.doc].nombre] || 0) + 1;
     });
+    // Si eligió dejar la cantidad como estaba, no se vuelve a preguntar por ese mismo valor.
+    imp.filas.forEach(function (r) {
+      var m = r.importar && r.cambio && r.accion === 'dejar' ? movPorId(r.existenteId) : null;
+      if (m) m.cantIgnorada = r.cantidad;
+    });
+    actualizar.forEach(function (r) {
+      var m = movPorId(r.existenteId);
+      if (!m) return;
+      m.obs = (m.obs ? m.obs + ' · ' : '') + 'Cantidad actualizada desde Algoritmo el ' + fechaTxt(hoy()) + ' (antes ' + num(m.cantidad) + ')';
+      m.cantidad = r.cantidad;
+      if (!m.ident) m.ident = identDe(r);
+    });
     guardar();
     refrescar();
-    alert('Se importaron ' + listas.length + ' operaciones:\n' + Object.keys(cuenta).map(function (k) { return '· ' + k + ': ' + cuenta[k]; }).join('\n') +
+    alert('Se importaron ' + listas.length + ' operaciones nuevas' + (listas.length ? ':\n' : '.') +
+      Object.keys(cuenta).map(function (k) { return '· ' + k + ': ' + cuenta[k]; }).join('\n') +
+      (actualizar.length ? '\nSe actualizó la cantidad de ' + actualizar.length + ' operaciones ya cargadas.' : '') +
       (nuevos ? '\nSe agregaron ' + nuevos + ' clientes nuevos.' : ''));
   });
 

@@ -18,7 +18,13 @@ Página web para llevar el stock de semillas (girasol, maíz y sorgo): híbridos
        la vista previa pregunta si corresponde a esa operación. Pedido, remitos y factura quedan vinculados como una sola
        operación: el stock se descuenta una sola vez (lo mayor entre pedido, remitido y facturado) y se muestra el
        **saldo a remitir** (ej.: factura 100, remito 50 → la factura queda en 100 con saldo a remitir 50).
-     - Los clientes que no existen se agregan solos, y las filas ya importadas antes se saltean.
+     - Los clientes que no existen se agregan solos.
+     - **Sin duplicados**: cada renglón se identifica por código de operación + comprobante + cliente + descripción
+       (sin mirar la cantidad). Si ya estaba cargado con la misma cantidad, no se vuelve a cargar; si la cantidad cambió
+       en Algoritmo, se muestra «antes X, ahora Y» y se elige actualizarla o dejarla. Lo cargado a mano con el mismo
+       número de comprobante, cliente e híbrido también se reconoce.
+     - Columnas del listado de Algoritmo que se usan: «Nombre del Productor», «Descripción», «Cantidad»,
+       «Código Comprobante», «Comprobante» y «Fecha Comprobante» (se reconocen solas).
 5. **Posición comercial**: totales ingresados, salidas (ventas, reservas, pedidos de clientes, devoluciones) y saldo a remitir por híbrido y banda, filtrando por grano o por híbridos.
 6. **Reporte de stock**: ficha de cada híbrido con todas las operaciones, el saldo y el stock final.
 7. Los reportes se pueden **imprimir / guardar en PDF** o **descargar en Excel**.
