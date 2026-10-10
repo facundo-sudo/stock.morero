@@ -10,12 +10,23 @@
   var DEVOL = 'Devolución de cliente';
   // En el formulario de ventas también se cargan las devoluciones (que suman stock).
   var TIPOS_SALIDA = ['Venta', 'Reserva', 'Pedido de cliente', DEVOL];
-  // Códigos de operación de Algoritmo
+  var DEVOL_SEM = 'Devolución a semillero';
+  // En el formulario de compras también se cargan las devoluciones al semillero (que restan stock).
+  var TIPOS_COMPRA_FORM = TIPOS_INGRESO.concat([DEVOL_SEM]);
+  // Códigos de operación de Algoritmo: ventas
   var DOCS = {
     FAC: { nombre: 'Factura', tipo: 'Venta' },
     REM: { nombre: 'Remito', tipo: 'Venta' },
     PED: { nombre: 'Pedido', tipo: 'Pedido de cliente' },
     RDE: { nombre: 'Devolución', tipo: DEVOL }
+  };
+  // Códigos de operación de Algoritmo: compras
+  var DOCS_C = {
+    PED: { nombre: 'Pedido', tipo: 'Pedido' },
+    REM: { nombre: 'Remito', tipo: 'Compra' },
+    FAC: { nombre: 'Factura', tipo: 'Compra' },
+    CON: { nombre: 'Consignación', tipo: 'Mercadería consignada' },
+    DEV: { nombre: 'Devolución', tipo: DEVOL_SEM }
   };
 
   // ---------- Datos ----------
@@ -120,7 +131,7 @@
 
   function claseDe(tipo) { return TIPOS_INGRESO.indexOf(tipo) >= 0 || tipo === DEVOL ? 'ingreso' : 'salida'; }
   // Las devoluciones de clientes se ven y se cargan en «Ventas».
-  function enVentas(m) { return m.clase === 'salida' || m.tipo === DEVOL; }
+  function enVentas(m) { return (m.clase === 'salida' && m.tipo !== DEVOL_SEM) || m.tipo === DEVOL; }
 
   function movPorId(id) { return id ? db.movimientos.find(function (m) { return m.id === id; }) : null; }
 
@@ -128,15 +139,21 @@
   function docDe(m) {
     if (!m) return '';
     if (m.doc) return m.doc;
-    if (m.tipo === 'Venta') return 'FAC';
-    if (m.tipo === 'Pedido de cliente' || m.tipo === 'Reserva') return 'PED';
+    if (m.tipo === 'Venta' || (m.clase === 'ingreso' && m.tipo === 'Compra')) return 'FAC';
+    if (m.tipo === 'Pedido de cliente' || m.tipo === 'Reserva' || (m.clase === 'ingreso' && m.tipo === 'Pedido')) return 'PED';
+    if (m.tipo === 'Mercadería consignada') return 'CON';
     return '';
   }
+
+  function docsDe(m) { return enVentas(m) ? DOCS : DOCS_C; }
+
+  // Para vincular: un pedido, una entrega (remito o consignación) o una factura. Las devoluciones no se vinculan.
+  function claseDoc(doc) { return doc === 'CON' ? 'REM' : (doc === 'PED' || doc === 'REM' || doc === 'FAC' ? doc : ''); }
 
   // Un pedido, sus remitos y su factura forman una sola operación (mismo «grupo»).
   // El stock se descuenta una sola vez: lo mayor entre lo pedido, lo remitido y lo facturado.
   function claveGrupo(m) { return m.grupo || m.id; }
-  function agrupable(m) { return m.clase === 'salida' && !!docDe(m); }
+  function agrupable(m) { return !!claseDoc(docDe(m)); }
 
   var cache = null;
   function invalidar() { cache = null; }
@@ -155,14 +172,14 @@
       g.PED = 0; g.REM = 0; g.FAC = 0;
       var antes = 0;
       g.miembros.forEach(function (m) {
-        g[docDe(m)] += Number(m.cantidad || 0);
+        g[claseDoc(docDe(m))] += Number(m.cantidad || 0);
         var ahora = Math.max(g.PED, g.REM, g.FAC);
         efectos[m.id] = ahora - antes;
         antes = ahora;
       });
       g.aRemitir = Math.max(0, Math.max(g.PED, g.FAC) - g.REM);
       // El saldo a remitir se muestra en el primer pedido o factura de la operación.
-      var raiz = g.miembros.find(function (m) { return docDe(m) !== 'REM'; });
+      var raiz = g.miembros.find(function (m) { return claseDoc(docDe(m)) !== 'REM'; });
       g.raizId = raiz ? raiz.id : '';
     });
     cache = { grupos: grupos, efectos: efectos };
@@ -183,7 +200,7 @@
     return g ? g.miembros.filter(function (x) { return x.id !== m.id; }) : [];
   }
 
-  // Saldo a remitir de la operación (null si esta fila no lo muestra).
+  // Saldo a remitir (ventas) o a recibir (compras) de la operación (null si esta fila no lo muestra).
   function aRemitir(m) {
     var g = grupoDe(m);
     // Solo para operaciones que vienen de Algoritmo (con remitos); lo cargado a mano no lleva saldo a remitir.
@@ -192,7 +209,7 @@
   }
 
   function nombreDoc(m) {
-    var d = DOCS[docDe(m)];
+    var d = docsDe(m)[docDe(m)];
     return (m.doc && d ? d.nombre : m.tipo) + (m.comprobante ? ' ' + m.comprobante : '') + ' del ' + fechaTxt(m.fecha);
   }
 
@@ -200,8 +217,9 @@
     var otros = hijos(m);
     if (!otros.length) return '';
     var e = efecto(m), c = Number(m.cantidad || 0);
+    var mueve = m.clase === 'ingreso' ? 'suma' : 'descuenta';
     return 'Vinculada con ' + otros.map(nombreDoc).join(', ') +
-      (e === c ? '' : e ? ' (descuenta ' + num(e) + ' bls.; el resto ya estaba contado)' : ' (no descuenta stock: ya estaba contado)');
+      (e === c ? '' : e ? ' (' + mueve + ' ' + num(e) + ' bls.; el resto ya estaba contado)' : ' (no ' + mueve + ' stock: ya estaba contado)');
   }
 
   // Stock de un híbrido (opcionalmente de una banda). Ingresos suman, salidas restan.
@@ -545,7 +563,7 @@
   });
 
   // ---------- Compras y ventas ----------
-  opciones($('#tipo-compras'), TIPOS_INGRESO, 'Todos los tipos');
+  opciones($('#tipo-compras'), TIPOS_COMPRA_FORM, 'Todos los tipos');
   opciones($('#tipo-ventas'), TIPOS_SALIDA, 'Todos los tipos');
 
   function renderMovs(clase) {
@@ -553,7 +571,7 @@
     var q = norm($(ing ? '#busca-compras' : '#busca-ventas').value);
     var tipo = $(ing ? '#tipo-compras' : '#tipo-ventas').value;
     var t = $(ing ? '#tabla-compras' : '#tabla-ventas');
-    var soloRemitir = !ing && $('#solo-remitir').checked;
+    var soloRemitir = $(ing ? '#solo-recibir' : '#solo-remitir').checked;
     var todos = db.movimientos.filter(function (m) { return enVentas(m) === !ing; });
     if (!todos.length) {
       t.innerHTML = '<tr><td class="vacio">' + (ing ? 'Todavía no hay compras cargadas.' : 'Todavía no hay ventas ni reservas cargadas.') + '</td></tr>';
@@ -566,8 +584,8 @@
     }).sort(function (a, b) { return (b.fecha || '').localeCompare(a.fecha || '') || (b.creado || 0) - (a.creado || 0); });
 
     var cab = '<thead><tr><th>Fecha</th><th>Tipo</th>' + (ing ? '' : '<th>Cliente</th>') +
-      '<th>Grano</th><th>Semillero</th><th>Híbrido</th><th>Banda</th><th class="num">Bolsas</th>' + (ing ? '' : '<th class="num">A remitir</th>') + '<th class="num">Precio</th><th>Comprob.</th><th>Obs.</th><th class="acc"></th></tr></thead>';
-    var cols = ing ? 11 : 13;
+      '<th>Grano</th><th>Semillero</th><th>Híbrido</th><th>Banda</th><th class="num">Bolsas</th><th class="num">' + (ing ? 'A recibir' : 'A remitir') + '</th><th class="num">Precio</th><th>Comprob.</th><th>Obs.</th><th class="acc"></th></tr></thead>';
+    var cols = ing ? 12 : 13;
     t.innerHTML = cab + '<tbody>' + (lista.length ? lista.map(function (m) {
       var h = hibrido(m.hibridoId) || {}, c = cliente(m.clienteId);
       var ar = aRemitir(m), vin = textoVinculo(m);
@@ -576,9 +594,10 @@
         (ing ? '' : '<td>' + esc(c ? c.nombre : '(cliente borrado)') + '</td>') +
         '<td>' + esc(h.grano) + '</td><td>' + esc(h.semillero) + '</td><td><b>' + esc(h.hibrido) + '</b></td><td>' + esc(m.banda) + '</td>' +
         '<td class="num">' + num(m.cantidad) + '</td>' +
-        (ing ? '' : '<td class="num' + (ar > 0 ? ' neg' : '') + '">' + (ar == null ? '' : num(ar)) + '</td>') +
+        '<td class="num' + (ar > 0 ? ' neg' : '') + '">' + (ar == null ? '' : num(ar)) + '</td>' +
         '<td class="num">' + precioTxt(m) + '</td><td>' + esc(m.comprobante) + '</td>' +
-        '<td>' + (vin ? '<small class="vinc">' + esc(vin) + '</small><br>' : '') + esc(m.obs) + '</td>' +
+        '<td>' + (m.proveedor ? '<small>Proveedor: ' + esc(m.proveedor) + '</small><br>' : '') +
+        (vin ? '<small class="vinc">' + esc(vin) + '</small><br>' : '') + esc(m.obs) + '</td>' +
         '<td class="acc"><button class="mini" data-edit-m="' + m.id + '">Editar</button> ' +
         '<button class="mini borrar" data-del-m="' + m.id + '">Borrar</button></td></tr>';
     }).join('') : '<tr><td colspan="' + cols + '" class="vacio">No hay coincidencias.</td></tr>') + '</tbody>';
@@ -588,7 +607,7 @@
     var clase = s === 'compras' ? 'ingreso' : 'salida';
     $('#busca-' + s).addEventListener('input', function () { renderMovs(clase); });
     $('#tipo-' + s).addEventListener('change', function () { renderMovs(clase); });
-    if (s === 'ventas') $('#solo-remitir').addEventListener('change', function () { renderMovs(clase); });
+    $(s === 'ventas' ? '#solo-remitir' : '#solo-recibir').addEventListener('change', function () { renderMovs(clase); });
     $('#tabla-' + s).addEventListener('click', function (e) {
       var b = e.target.closest('button');
       if (!b) return;
@@ -627,7 +646,7 @@
     fMov.reset();
     fMov.uid.value = m ? m.id : '';
     fMov.clase.value = clase;
-    opciones(fMov.tipo, ing ? TIPOS_INGRESO : TIPOS_SALIDA);
+    opciones(fMov.tipo, ing ? TIPOS_COMPRA_FORM : TIPOS_SALIDA);
     $('#tit-mov').textContent = (m ? 'Editar ' : 'Cargar ') + (ing ? 'compra / ingreso' : 'venta, pedido o devolución');
     $('#bloque-cliente').style.display = ing ? 'none' : '';
     $('#vinculo-mov').textContent = m ? textoVinculo(m) : '';
@@ -758,7 +777,7 @@
       datos.id = nuevoId();
       datos.creado = Date.now();
       db.movimientos.push(datos);
-      aviso(datos.tipo + ' cargada: ' + (sale ? 'descuenta ' : 'suma ') + num(cant) + ' bolsas.');
+      aviso(datos.tipo + ': ' + (sale ? 'descuenta ' : 'suma ') + num(cant) + ' bolsas.');
     }
     guardar();
     refrescar();
@@ -868,10 +887,19 @@
     return -1;
   }
 
-  $('#imp-ventas').addEventListener('change', function (e) {
-    var archivo = e.target.files[0];
-    e.target.value = '';
-    if (!archivo) return;
+  // modo: 'ventas' (clientes) o 'compras' (proveedores).
+  function docsModo() { return imp.modo === 'compras' ? DOCS_C : DOCS; }
+  function claveMapeo() { return CLAVE_MAPEO + (imp.modo === 'compras' ? '_compras' : ''); }
+
+  ['ventas', 'compras'].forEach(function (modo) {
+    $('#imp-' + modo).addEventListener('change', function (e) {
+      var archivo = e.target.files[0];
+      e.target.value = '';
+      if (archivo) abrirImportacion(archivo, modo);
+    });
+  });
+
+  function abrirImportacion(archivo, modo) {
     if (!db.hibridos.length) { aviso('Primero cargá la lista de híbridos.', true); ir('hibridos'); return; }
     leerExcel(archivo, function (filas) {
       if (!filas.length) { aviso('El archivo está vacío.', true); return; }
@@ -879,16 +907,19 @@
       var titulos = filas[ft].map(function (c, i) { return String(c || '').trim() || 'Columna ' + (i + 1); });
       var ancho = filas.reduce(function (m, f) { return Math.max(m, f.length); }, 0);
       for (var i = titulos.length; i < ancho; i++) titulos.push('Columna ' + (i + 1));
-      imp = { nombre: archivo.name, titulos: titulos, datos: filas.slice(ft + 1), filas: [] };
+      imp = { modo: modo, nombre: archivo.name, titulos: titulos, datos: filas.slice(ft + 1), filas: [] };
+      var compras = modo === 'compras';
 
       var guardado = {};
-      try { guardado = JSON.parse(localStorage.getItem(CLAVE_MAPEO) || '{}'); } catch (err) { guardado = {}; }
+      try { guardado = JSON.parse(localStorage.getItem(claveMapeo()) || '{}'); } catch (err) { guardado = {}; }
       var porTitulo = function (k) { return guardado[k] ? titulos.indexOf(guardado[k]) : -1; };
       var col = {
         cliente: porTitulo('cliente'), descripcion: porTitulo('descripcion'), cantidad: porTitulo('cantidad'),
         fecha: porTitulo('fecha'), comprobante: porTitulo('comprobante'), operacion: porTitulo('operacion')
       };
-      if (col.cliente < 0) col.cliente = adivinarColumna(titulos, ['nombre del productor', 'productor', 'razon social', 'cliente', 'nombre', 'denominacion'],
+      if (col.cliente < 0) col.cliente = adivinarColumna(titulos, compras
+        ? ['nombre del proveedor', 'proveedor', 'nombre del productor', 'razon social', 'nombre', 'denominacion', 'semillero']
+        : ['nombre del productor', 'productor', 'razon social', 'cliente', 'nombre', 'denominacion'],
         ['cod', 'cuit', 'nro', 'num', 'calle', 'piso', 'depto', 'postal', 'localidad', 'provincia', 'departamento', 'vendedor', 'secundario']);
       if (col.descripcion < 0) col.descripcion = adivinarColumna(titulos, ['descripcion', 'articulo', 'producto', 'detalle'], ['cod']);
       if (col.cantidad < 0) col.cantidad = adivinarColumna(titulos, ['cantidad', 'cant', 'bolsas', 'unidades']);
@@ -907,20 +938,38 @@
         s.value = String(col[s.dataset.col]);
       });
       $('#imp-archivo').textContent = 'Archivo: ' + archivo.name + ' · ' + imp.datos.length + ' filas';
+      $('#imp-titulo').textContent = compras ? 'Importar compras desde Algoritmo' : 'Importar ventas desde Algoritmo';
+      $('#imp-lbl-entidad').textContent = compras ? 'Proveedor' : 'Cliente';
+      $('#imp-lbl-codigos').textContent = '(' + Object.keys(docsModo()).join(', ') + ')';
+      var D = docsModo();
+      $('#imp-tipo').innerHTML = Object.keys(D).map(function (k) {
+        return '<option value="' + k + '">' + k + ' · ' + D[k].nombre + ' (' + (claseDe(D[k].tipo) === 'ingreso' ? 'suma' : 'resta') + ' stock)</option>';
+      }).join('');
+      $('#imp-tipo').value = compras ? 'REM' : 'FAC';
       $('#imp-solo-problemas').checked = false;
       armarImportacion();
       $('#dlg-imp').showModal();
     }, true);
-  });
+  }
 
   var CAMPOS_IMP = ['cliente', 'descripcion', 'cantidad', 'operacion', 'fecha', 'comprobante'];
 
   function columnaElegida(k) { return Number($('#form-imp [data-col="' + k + '"]').value); }
 
-  // FAC (factura) y REM (remito) → venta; PED → pedido; RDE → devolución (suma stock).
+  // Ventas: FAC y REM → venta; PED → pedido; RDE → devolución (suma stock).
+  // Compras: PED/OC → pedido; REM y FAC → compra; consignación → mercadería consignada; devolución → resta stock.
   function docDeTexto(txt) {
     var t = norm(txt);
     if (!t) return '';
+    var palabra = function (p) { return new RegExp('(^|[^a-z])(' + p + ')([^a-z]|$)').test(t); };
+    if (imp.modo === 'compras') {
+      if (t.indexOf('consig') >= 0 || palabra('con|rco|rcn')) return 'CON';
+      if (t.indexOf('devol') >= 0 || palabra('rde|dev|rdp')) return 'DEV';
+      if (t.indexOf('factura') >= 0 || palabra('fac|fca|fcb|fcc|fc')) return 'FAC';
+      if (t.indexOf('remito') >= 0 || palabra('rem|rec')) return 'REM';
+      if (t.indexOf('pedido') >= 0 || t.indexOf('orden') >= 0 || palabra('ped|oc')) return 'PED';
+      return '';
+    }
     if (/(^|[^a-z])rde([^a-z]|$)/.test(t) || t.indexOf('devol') >= 0) return 'RDE';
     if (/(^|[^a-z])(fac|fca|fcb|fc)([^a-z]|$)/.test(t) || t.indexOf('factura') >= 0) return 'FAC';
     if (/(^|[^a-z])rem([^a-z]|$)/.test(t) || t.indexOf('remito') >= 0) return 'REM';
@@ -956,7 +1005,7 @@
     // Si el mismo renglón aparece repetido en un comprobante, se numera (1.º, 2.º…) para distinguirlos.
     var vistas = {};
     imp.filas.forEach(function (r) {
-      if (r.doc === 'RDE' && r.cantidad < 0) r.cantidad = -r.cantidad;
+      if ((r.doc === 'RDE' || r.doc === 'DEV') && r.cantidad < 0) r.cantidad = -r.cantidad;
       var base = identBase(r);
       r.ordinal = vistas[base] = (vistas[base] || 0) + 1;
     });
@@ -979,11 +1028,11 @@
       var id = identDe(r);
       var m = db.movimientos.find(function (x) { return x.ident === id && !usados[x.id]; });
       if (!m && r.comprobante && r.hibridoId) {
-        var clase = claseDe(DOCS[r.doc].tipo);
+        var clase = claseDe(docsModo()[r.doc].tipo), compras = imp.modo === 'compras';
         m = db.movimientos.find(function (x) {
           var c = cliente(x.clienteId);
           return !x.ident && !usados[x.id] && x.clase === clase && x.hibridoId === r.hibridoId &&
-            norm(x.comprobante) === norm(r.comprobante) && c && norm(c.nombre) === norm(r.cliente);
+            norm(x.comprobante) === norm(r.comprobante) && (compras || (c && norm(c.nombre) === norm(r.cliente)));
         });
       }
       r.existenteId = m ? m.id : '';
@@ -999,7 +1048,7 @@
   function problemaBasico(r) {
     if (r.repetida) return 'Ya cargada';
     if (!r.hibridoId) return 'Sin híbrido';
-    if (!r.cliente) return 'Sin cliente';
+    if (!r.cliente && imp.modo !== 'compras') return 'Sin cliente';
     if (!(r.cantidad > 0)) return 'Cantidad inválida';
     if (!r.banda) return 'Falta banda';
     return '';
@@ -1020,12 +1069,15 @@
   // Recorre las filas por fecha. Para cada remito o factura busca operaciones anteriores del mismo
   // cliente e híbrido (guardadas o de este mismo archivo) que todavía tengan saldo, para preguntar.
   function calcularVinculos() {
-    var bolsa = [];
+    var bolsa = [], compras = imp.modo === 'compras', D = docsModo();
     var grupos = calcularGrupos().grupos;
+    // En compras alcanza con el híbrido (el semillero es el mismo); en ventas también tiene que ser el mismo cliente.
+    var mismaEntidad = function (b, r) { return compras || b.cli === norm(r.cliente); };
     Object.keys(grupos).forEach(function (k) {
       var g = grupos[k], m0 = g.miembros[0], c = cliente(m0.clienteId);
+      if ((m0.clase === 'ingreso') !== compras) return;
       bolsa.push({
-        clave: 'm:' + k, cli: norm(c ? c.nombre : ''), hibridoId: m0.hibridoId, PED: g.PED, REM: g.REM, FAC: g.FAC,
+        clave: 'm:' + k, cli: norm(c ? c.nombre : ''), hibridoId: m0.hibridoId, banda: m0.banda, PED: g.PED, REM: g.REM, FAC: g.FAC,
         texto: g.miembros.map(nombreDoc).join(' + ')
       });
     });
@@ -1036,25 +1088,26 @@
       var r = imp.filas[i];
       r.candidatos = [];
       r.descuenta = r.cantidad;
-      if (!r.importar || problemaBasico(r) || r.doc === 'RDE' || r.existenteId) { r.vinculo = ''; return; }
-      if (r.doc === 'REM' || r.doc === 'FAC') {
+      var k = claseDoc(r.doc);
+      if (!r.importar || problemaBasico(r) || !k || r.existenteId) { r.vinculo = ''; return; }
+      if (k === 'REM' || k === 'FAC') {
         r.candidatos = bolsa.filter(function (b) {
-          return b.cli === norm(r.cliente) && b.hibridoId === r.hibridoId && saldoPara(r.doc, b) > 0;
-        }).map(function (b) { return { clave: b.clave, texto: b.texto, pend: saldoPara(r.doc, b) }; });
+          return mismaEntidad(b, r) && b.hibridoId === r.hibridoId && b.banda === r.banda && saldoPara(k, b) > 0;
+        }).map(function (b) { return { clave: b.clave, texto: b.texto, pend: saldoPara(k, b) }; });
       } else {
         r.vinculo = '';
       }
       if (r.vinculo && r.vinculo !== 'nuevo' && !r.candidatos.some(function (b) { return b.clave === r.vinculo; })) r.vinculo = '';
-      var texto = DOCS[r.doc].nombre + (r.comprobante ? ' ' + r.comprobante : '') + ' del ' + fechaTxt(r.fecha) + ' (de este archivo)';
+      var texto = D[r.doc].nombre + (r.comprobante ? ' ' + r.comprobante : '') + ' del ' + fechaTxt(r.fecha) + ' (de este archivo)';
       if (r.vinculo && r.vinculo !== 'nuevo') {
         var b = bolsa.find(function (x) { return x.clave === r.vinculo; });
         var antes = Math.max(b.PED, b.REM, b.FAC);
-        b[r.doc] += r.cantidad;
+        b[k] += r.cantidad;
         r.descuenta = Math.max(b.PED, b.REM, b.FAC) - antes;
         b.texto += ' + ' + texto;
       } else {
-        var nuevo = { clave: 'i:' + i, fila: i, cli: norm(r.cliente), hibridoId: r.hibridoId, PED: 0, REM: 0, FAC: 0, texto: texto };
-        nuevo[r.doc] = r.cantidad;
+        var nuevo = { clave: 'i:' + i, fila: i, cli: norm(r.cliente), hibridoId: r.hibridoId, banda: r.banda, PED: 0, REM: 0, FAC: 0, texto: texto };
+        nuevo[k] = r.cantidad;
         bolsa.push(nuevo);
       }
     });
@@ -1063,7 +1116,8 @@
   function renderImportacion() {
     var t = $('#imp-tabla');
     if (!imp.filas.length) {
-      t.innerHTML = '<tr><td class="vacio">Elegí las columnas de Cliente, Descripción y Cantidad para ver las ventas.</td></tr>';
+      t.innerHTML = '<tr><td class="vacio">Elegí las columnas de ' + (imp.modo === 'compras' ? 'Proveedor' : 'Cliente') +
+        ', Descripción y Cantidad para ver las operaciones.</td></tr>';
       $('#imp-resumen').innerHTML = '';
       $('#imp-confirmar').textContent = 'Importar';
       return;
@@ -1074,13 +1128,14 @@
       return '<option value="' + h.id + '">' + esc(h.hibrido + ' · ' + h.semillero + ' (' + h.grano + ')') + '</option>';
     }).join('');
     var opcB = '<option value="">Elegir…</option>' + BANDAS.map(function (b) { return '<option>' + b + '</option>'; }).join('');
-    var opcD = Object.keys(DOCS).map(function (k) { return '<option value="' + k + '">' + k + ' · ' + DOCS[k].nombre + '</option>'; }).join('');
-    var html = '<thead><tr><th></th><th>Cliente</th><th>Operación</th><th>Descripción en Algoritmo</th><th>Híbrido</th><th>Banda</th>' +
+    var compras = imp.modo === 'compras', D = docsModo();
+    var opcD = Object.keys(D).map(function (k) { return '<option value="' + k + '">' + k + ' · ' + D[k].nombre + '</option>'; }).join('');
+    var html = '<thead><tr><th></th><th>' + (compras ? 'Proveedor' : 'Cliente') + '</th><th>Operación</th><th>Descripción en Algoritmo</th><th>Híbrido</th><th>Banda</th>' +
       '<th class="num">Bolsas</th><th>Fecha</th><th>¿Corresponde a una operación anterior?</th><th>Estado</th></tr></thead><tbody>';
     imp.filas.forEach(function (r, i) {
       var prob = problemaFila(r);
       if (solo && !prob) return;
-      var clienteNuevo = r.cliente && !db.clientes.some(function (c) { return norm(c.nombre) === norm(r.cliente); });
+      var clienteNuevo = !compras && r.cliente && !db.clientes.some(function (c) { return norm(c.nombre) === norm(r.cliente); });
       var vinc = '—';
       if (r.repetida) vinc = '<small>Ya está cargada con la misma cantidad; no se vuelve a cargar.</small>';
       if (r.cambio) {
@@ -1090,14 +1145,17 @@
           '<option value="actualizar"' + (r.accion === 'actualizar' ? ' selected' : '') + '>Actualizar a ' + num(r.cantidad) + ' bls.</option>' +
           '<option value="dejar"' + (r.accion === 'dejar' ? ' selected' : '') + '>Dejar en ' + num(r.cambio.antes) + ' bls.</option></select>';
       } else if (r.candidatos && r.candidatos.length) {
-        var pregunta = r.doc === 'REM' ? '¿Este remito descuenta de…?' : '¿Esta factura es nueva o corresponde a…?';
+        var pregunta = claseDoc(r.doc) === 'FAC' ? '¿Esta factura es nueva o corresponde a…?'
+          : compras ? '¿Este ingreso corresponde a…?' : '¿Este remito descuenta de…?';
+        var mueve = compras ? 'suma' : 'descuenta';
         vinc = '<select data-i="' + i + '" data-k="vinculo" class="sel-vinc' + (r.vinculo ? '' : ' falta') + '">' +
           '<option value="">' + pregunta + '</option>' +
-          '<option value="nuevo"' + (r.vinculo === 'nuevo' ? ' selected' : '') + '>No, es nueva (descuenta stock)</option>' +
+          '<option value="nuevo"' + (r.vinculo === 'nuevo' ? ' selected' : '') + '>No, es nueva (' + mueve + ' stock)</option>' +
           r.candidatos.map(function (b) {
             return '<option value="' + b.clave + '"' + (r.vinculo === b.clave ? ' selected' : '') + '>Sí: ' + esc(b.texto) + ' · saldo ' + num(b.pend) + ' bls.</option>';
           }).join('') + '</select>' +
-          (r.vinculo && r.vinculo !== 'nuevo' ? '<br><small>' + (r.descuenta ? 'Descuenta ' + num(r.descuenta) + ' bls. (excede el saldo)' : 'No descuenta stock (ya contado)') + '</small>' : '');
+          (r.vinculo && r.vinculo !== 'nuevo' ? '<br><small>' + (r.descuenta ? (compras ? 'Suma ' : 'Descuenta ') + num(r.descuenta) + ' bls. (excede el saldo)'
+            : 'No ' + mueve + ' stock (ya contado)') + '</small>' : '');
       }
       html += '<tr class="' + (!r.importar ? 'omitida' : prob ? 'revisar' : '') + '">' +
         '<td><input type="checkbox" data-i="' + i + '" data-k="importar"' + (r.importar ? ' checked' : '') + '></td>' +
@@ -1206,7 +1264,8 @@
       var i = columnaElegida(k);
       if (i >= 0) mapeo[k] = imp.titulos[i];
     });
-    try { localStorage.setItem(CLAVE_MAPEO, JSON.stringify(mapeo)); } catch (err) { /* no es grave */ }
+    try { localStorage.setItem(claveMapeo(), JSON.stringify(mapeo)); } catch (err) { /* no es grave */ }
+    var compras = imp.modo === 'compras', D = docsModo();
 
     // Se guardan por fecha, así una fila puede corresponder a otra anterior del mismo archivo.
     var nuevos = 0, ahora = Date.now(), idDeFila = {}, cuenta = {};
@@ -1216,8 +1275,8 @@
     orden.forEach(function (i, n) {
       var r = imp.filas[i];
       if (!r.importar || problemaFila(r) || r.cambio) return;
-      var c = db.clientes.find(function (x) { return norm(x.nombre) === norm(r.cliente); });
-      if (!c) {
+      var c = compras ? null : db.clientes.find(function (x) { return norm(x.nombre) === norm(r.cliente); });
+      if (!c && !compras) {
         c = { id: nuevoId(), nombre: r.cliente, cuit: '', localidad: '', telefono: '', correo: '' };
         db.clientes.push(c);
         nuevos++;
@@ -1225,17 +1284,17 @@
       var grupo = '';
       if (r.vinculo && r.vinculo.indexOf('m:') === 0) grupo = r.vinculo.slice(2);
       if (r.vinculo && r.vinculo.indexOf('i:') === 0) grupo = idDeFila[r.vinculo.slice(2)] || '';
-      var tipo = DOCS[r.doc].tipo;
+      var tipo = D[r.doc].tipo;
       var m = {
         id: nuevoId(), creado: ahora + n, clase: claseDe(tipo), tipo: tipo, doc: r.doc, fecha: r.fecha,
-        clienteId: c.id, hibridoId: r.hibridoId, banda: r.banda, cantidad: r.cantidad,
+        clienteId: c ? c.id : '', proveedor: compras ? r.cliente : '', hibridoId: r.hibridoId, banda: r.banda, cantidad: r.cantidad,
         precio: null, moneda: 'USD', comprobante: r.comprobante,
         obs: 'Importado de Algoritmo: ' + r.desc, ident: identDe(r)
       };
       if (grupo) m.grupo = grupo;
       db.movimientos.push(m);
       idDeFila[i] = claveGrupo(m);
-      cuenta[DOCS[r.doc].nombre] = (cuenta[DOCS[r.doc].nombre] || 0) + 1;
+      cuenta[D[r.doc].nombre] = (cuenta[D[r.doc].nombre] || 0) + 1;
     });
     // Si eligió dejar la cantidad como estaba, no se vuelve a preguntar por ese mismo valor.
     imp.filas.forEach(function (r) {
@@ -1330,9 +1389,9 @@
   }
 
   // ---------- Posición comercial ----------
-  var COLS_POS = ['Exist. inicial', 'Compras', 'Pedidos', 'Consignada', 'Total ingresado', 'Ventas', 'Reservas', 'Pedidos clientes',
-    'Devoluciones', 'Total salidas', 'Saldo', 'Saldo a remitir'];
-  var COL_SALDO = 10;
+  var COLS_POS = ['Exist. inicial', 'Compras', 'Pedidos', 'Consignada', 'Devol. a semillero', 'Total ingresado', 'Ventas', 'Reservas',
+    'Pedidos clientes', 'Devoluciones', 'Total salidas', 'Saldo', 'Saldo a recibir', 'Saldo a remitir'];
+  var COL_SALDO = 11;
   var datosPosicion = null;
 
   function calcularPosicion() {
@@ -1344,20 +1403,25 @@
       if (!bandas.length) bandas = [f.banda || '—'];
       bandas.forEach(function (b) {
         var ms = movs.filter(function (m) { return m.banda === b; });
-        // Un pedido que ya tiene remito o factura se cuenta como venta.
+        // Un pedido que ya tiene remito o factura se cuenta como venta (o como compra, si es un pedido al semillero).
         var tipoPos = function (m) {
-          var g = m.tipo === 'Pedido de cliente' ? grupoDe(m) : null;
-          return g && (g.REM || g.FAC) ? 'Venta' : m.tipo;
+          var esPed = m.tipo === 'Pedido de cliente' || (m.clase === 'ingreso' && m.tipo === 'Pedido');
+          var g = esPed ? grupoDe(m) : null;
+          if (!g || !(g.REM || g.FAC)) return m.tipo;
+          return m.clase === 'ingreso' ? 'Compra' : 'Venta';
         };
         var sum = function (clase, tipo) {
           return ms.filter(function (m) { return m.clase === clase && tipoPos(m) === tipo; }).reduce(function (s, m) { return s + efecto(m); }, 0);
         };
-        var v = [sum('ingreso', 'Existencia inicial campaña'), sum('ingreso', 'Compra'), sum('ingreso', 'Pedido'), sum('ingreso', 'Mercadería consignada')];
-        var ingr = v[0] + v[1] + v[2] + v[3];
+        var v = [sum('ingreso', 'Existencia inicial campaña'), sum('ingreso', 'Compra'), sum('ingreso', 'Pedido'), sum('ingreso', 'Mercadería consignada'),
+          sum('salida', DEVOL_SEM)];
+        var ingr = v[0] + v[1] + v[2] + v[3] - v[4];
         var ven = sum('salida', 'Venta'), res = sum('salida', 'Reserva'), ped = sum('salida', 'Pedido de cliente'), dev = sum('ingreso', DEVOL);
         var sal = ven + res + ped - dev;
-        var arem = ms.reduce(function (s, m) { var a = aRemitir(m); return s + (a > 0 ? a : 0); }, 0);
-        filas.push({ h: h, banda: b, v: v.concat([ingr, ven, res, ped, dev, sal, ingr - sal, arem]) });
+        var pendiente = function (clase) {
+          return ms.reduce(function (s, m) { var a = m.clase === clase ? aRemitir(m) : null; return s + (a > 0 ? a : 0); }, 0);
+        };
+        filas.push({ h: h, banda: b, v: v.concat([ingr, ven, res, ped, dev, sal, ingr - sal, pendiente('ingreso'), pendiente('salida')]) });
       });
     });
     return filas;
@@ -1419,9 +1483,9 @@
           saldo += ing - sal;
           var c = cliente(m.clienteId);
           var notas = [textoVinculo(m)], ar = aRemitir(m);
-          if (ar != null) notas.push('Saldo a remitir: ' + num(ar) + ' bls.');
+          if (ar != null) notas.push((m.clase === 'ingreso' ? 'Saldo a recibir: ' : 'Saldo a remitir: ') + num(ar) + ' bls.');
           return {
-            m: m, quien: m.clienteId ? (c ? c.nombre : '(cliente borrado)') : h.semillero, ing: ing, sal: sal, saldo: saldo,
+            m: m, quien: m.clienteId ? (c ? c.nombre : '(cliente borrado)') : (m.proveedor || h.semillero), ing: ing, sal: sal, saldo: saldo,
             nota: notas.filter(Boolean).join(' · ')
           };
         });

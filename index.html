@@ -87,12 +87,16 @@
       <h2>Compras e ingresos</h2>
       <div class="barra">
         <button class="btn" id="btn-nueva-compra">＋ Cargar compra</button>
+        <label class="btn btn-sec">Importar compras de Algoritmo (Excel)
+          <input type="file" id="imp-compras" accept=".xlsx,.xls,.csv" hidden>
+        </label>
       </div>
-      <p class="ayuda">Suman stock: existencia inicial de campaña, compras, pedidos y mercadería consignada.</p>
+      <p class="ayuda">Suman stock: existencia inicial de campaña, compras, pedidos y mercadería consignada. Las devoluciones a semillero restan. Al importar desde Algoritmo: PED/OC → pedido; REM y FAC → compra; consignación → mercadería consignada; devolución → resta stock. Si un remito o factura corresponde a un pedido o remito anterior del mismo híbrido, pregunta para no sumar dos veces y llevar el saldo a recibir.</p>
       <div class="filtros">
         <input type="search" id="busca-compras" placeholder="Buscar híbrido, semillero u observación…">
         <select id="tipo-compras"><option value="">Todos los tipos</option></select>
       </div>
+      <label class="chk-linea"><input type="checkbox" id="solo-recibir"> Mostrar solo pedidos y facturas con saldo a recibir</label>
       <div class="tabla-cont"><table id="tabla-compras"></table></div>
     </section>
 
@@ -281,24 +285,19 @@
   <!-- DIALOGO IMPORTAR VENTAS -->
   <dialog id="dlg-imp" class="grande">
     <form method="dialog" id="form-imp">
-      <h3>Importar ventas desde Algoritmo</h3>
+      <h3 id="imp-titulo">Importar desde Algoritmo</h3>
       <p class="ayuda" id="imp-archivo"></p>
       <fieldset class="mapeo">
         <legend>¿En qué columna del Excel está cada dato?</legend>
         <div class="tres">
-          <label>Cliente <select data-col="cliente" required></select></label>
+          <label><span id="imp-lbl-entidad">Cliente</span> <select data-col="cliente" required></select></label>
           <label>Descripción del producto <select data-col="descripcion" required></select></label>
           <label>Cantidad (bolsas) <select data-col="cantidad" required></select></label>
           <label>Fecha <small>(opcional)</small> <select data-col="fecha"></select></label>
           <label>N° de comprobante <small>(opcional)</small> <select data-col="comprobante"></select></label>
-          <label>Código de operación <small>(FAC, REM, PED, RDE)</small> <select data-col="operacion"></select></label>
+          <label>Código de operación <small id="imp-lbl-codigos"></small> <select data-col="operacion"></select></label>
           <label>Si no se reconoce la operación, tomar como
-            <select id="imp-tipo">
-              <option value="FAC">FAC · Factura (venta)</option>
-              <option value="REM">REM · Remito (venta)</option>
-              <option value="PED">PED · Pedido</option>
-              <option value="RDE">RDE · Devolución (suma stock)</option>
-            </select>
+            <select id="imp-tipo"></select>
           </label>
         </div>
       </fieldset>
