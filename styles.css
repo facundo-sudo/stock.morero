@@ -246,6 +246,20 @@ dialog {
   max-height: calc(100vh - 24px);
   box-shadow: 0 10px 40px rgba(0,0,0,.3);
 }
+dialog.grande { width: min(1100px, calc(100vw - 24px)); }
+.mapeo { border: 1px solid var(--borde); border-radius: 8px; padding: 10px 12px; margin: 0; }
+.mapeo legend { color: var(--gris); font-weight: 600; font-size: .9rem; padding: 0 4px; }
+.tres { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.imp-resumen { display: flex; flex-wrap: wrap; gap: 6px; font-size: .9rem; }
+.imp-tabla { max-height: 45vh; overflow: auto; }
+.imp-tabla select { padding: 5px 6px; font-size: .85rem; min-width: 120px; }
+.imp-tabla select[data-k=hibridoId] { min-width: 210px; }
+dialog label.chk-linea { flex-direction: row; font-weight: 400; }
+.imp-tabla td.desc { color: var(--gris); font-size: .85rem; min-width: 220px; }
+.imp-tabla tr.revisar td { background: #fff6e5; }
+.imp-tabla tr.omitida td { color: #9a9a9e; }
+.imp-tabla tr.omitida td.desc { text-decoration: line-through; }
+.etq.warn { background: #fff0cc; color: #8a5a00; }
 dialog::backdrop { background: rgba(30,30,32,.55); }
 dialog form { padding: 18px; display: flex; flex-direction: column; gap: 10px; }
 dialog label { display: flex; flex-direction: column; gap: 4px; font-size: .9rem; color: var(--gris); font-weight: 600; }
@@ -302,7 +316,7 @@ dialog label small { font-weight: 400; display: inline; }
 @media (max-width: 600px) {
   .encabezado .logo { height: 60px; }
   .encabezado h1 { font-size: 1.15rem; }
-  .dos { grid-template-columns: 1fr; }
+  .dos, .tres { grid-template-columns: 1fr; }
   .barra .btn { flex: 1 1 auto; }
   th, td { padding: 7px 8px; }
 }

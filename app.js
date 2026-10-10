@@ -316,14 +316,14 @@
   });
 
   // ---------- Importar Excel (se lee en el navegador) ----------
-  function leerExcel(archivo, listo) {
+  function leerExcel(archivo, listo, crudo) {
     if (typeof XLSX === 'undefined') { aviso('No se pudo cargar el lector de Excel.', true); return; }
     var r = new FileReader();
     r.onload = function () {
       try {
-        var libro = XLSX.read(new Uint8Array(r.result), { type: 'array' });
+        var libro = XLSX.read(new Uint8Array(r.result), { type: 'array', cellDates: !!crudo });
         var hoja = libro.Sheets[libro.SheetNames[0]];
-        var filas = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: '', raw: false });
+        var filas = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: '', raw: !!crudo });
         listo(filas.filter(function (f) { return f.some(function (c) { return String(c).trim() !== ''; }); }));
       } catch (err) {
         aviso('No se pudo leer el archivo. ¿Es un Excel?', true);
@@ -655,6 +655,298 @@
     }
     guardar();
     refrescar();
+  });
+
+  // ---------- Importar ventas de Algoritmo ----------
+  var CLAVE_MAPEO = 'morero_mapeo_algoritmo';
+  var imp = null; // { nombre, titulos, datos, filas }
+
+  // Separa un texto en palabras y números: "ADV5407 CL" -> ["adv","5407","cl"]
+  function fichas(txt) {
+    return norm(txt).replace(/([a-z])(\d)/g, '$1 $2').replace(/(\d)([a-z])/g, '$1 $2')
+      .split(/[^a-z0-9]+/).filter(Boolean);
+  }
+
+  // Busca el híbrido cargado cuyo nombre aparece completo dentro de la descripción.
+  // Si hay varios, gana el nombre más largo (y el del mismo grano que dice la descripción).
+  function detectarHibrido(desc) {
+    var d = fichas(desc);
+    var grano = granoEnTexto(desc);
+    var mejor = null, puntos = 0;
+    db.hibridos.forEach(function (h) {
+      var n = fichas(h.hibrido);
+      if (!n.length) return;
+      for (var i = 0; i + n.length <= d.length; i++) {
+        var ok = true;
+        for (var j = 0; j < n.length; j++) { if (d[i + j] !== n[j]) { ok = false; break; } }
+        if (ok) {
+          var p = n.join('').length * 10 + n.length + (grano && h.grano === grano ? 1000 : 0);
+          if (p > puntos) { puntos = p; mejor = h; }
+          break;
+        }
+      }
+    });
+    return mejor;
+  }
+
+  function granoEnTexto(txt) {
+    var t = norm(txt);
+    if (/\bgirasol/.test(t)) return 'Girasol';
+    if (/\bmaiz/.test(t)) return 'Maíz';
+    if (/\bsorgo/.test(t)) return 'Sorgo';
+    return '';
+  }
+
+  // Girasol: G0, G1, G2 -> Banda 1; G3 -> Banda 2; G3E, G4 -> Banda 3.
+  function bandaGirasol(desc) {
+    var m = norm(desc).match(/(?:^|[^a-z0-9])g\s?(3-?e|[0-4])(?![a-z0-9])/);
+    if (!m) return '';
+    var c = m[1].replace('-', '');
+    if (c === '0' || c === '1' || c === '2') return 'Banda 1';
+    if (c === '3') return 'Banda 2';
+    return 'Banda 3';
+  }
+
+  // Números escritos a la argentina ("1.250,5") o ya numéricos.
+  function numeroAR(v) {
+    if (typeof v === 'number') return v;
+    var t = String(v == null ? '' : v).trim().replace(/[^\d.,-]/g, '');
+    if (!t) return NaN;
+    if (t.indexOf(',') >= 0) t = t.replace(/\./g, '').replace(',', '.');
+    else if (/^-?\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, '');
+    return Number(t);
+  }
+
+  function fechaISO(v) {
+    if (v instanceof Date && !isNaN(v)) {
+      return v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0');
+    }
+    var m = String(v == null ? '' : v).trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+    if (m) {
+      var a = m[3].length === 2 ? '20' + m[3] : m[3];
+      return a + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0');
+    }
+    m = String(v == null ? '' : v).trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? m[0] : '';
+  }
+
+  // La fila de títulos es, entre las primeras 15, la que tiene más celdas con texto.
+  function filaTitulos(filas) {
+    var mejor = 0, max = -1;
+    for (var i = 0; i < Math.min(filas.length, 15); i++) {
+      var n = filas[i].filter(function (c) { return typeof c === 'string' && c.trim() && isNaN(numeroAR(c)); }).length;
+      if (n > max) { max = n; mejor = i; }
+    }
+    return mejor;
+  }
+
+  function adivinarColumna(titulos, palabras, evitar) {
+    var t = titulos.map(norm);
+    for (var p = 0; p < palabras.length; p++) {
+      var i = t.findIndex(function (x) {
+        return x.indexOf(palabras[p]) >= 0 && !(evitar || []).some(function (e) { return x.indexOf(e) >= 0; });
+      });
+      if (i >= 0) return i;
+    }
+    return -1;
+  }
+
+  $('#imp-ventas').addEventListener('change', function (e) {
+    var archivo = e.target.files[0];
+    e.target.value = '';
+    if (!archivo) return;
+    if (!db.hibridos.length) { aviso('Primero cargá la lista de híbridos.', true); ir('hibridos'); return; }
+    leerExcel(archivo, function (filas) {
+      if (!filas.length) { aviso('El archivo está vacío.', true); return; }
+      var ft = filaTitulos(filas);
+      var titulos = filas[ft].map(function (c, i) { return String(c || '').trim() || 'Columna ' + (i + 1); });
+      var ancho = filas.reduce(function (m, f) { return Math.max(m, f.length); }, 0);
+      for (var i = titulos.length; i < ancho; i++) titulos.push('Columna ' + (i + 1));
+      imp = { nombre: archivo.name, titulos: titulos, datos: filas.slice(ft + 1), filas: [] };
+
+      var guardado = {};
+      try { guardado = JSON.parse(localStorage.getItem(CLAVE_MAPEO) || '{}'); } catch (err) { guardado = {}; }
+      var porTitulo = function (k) { return guardado[k] ? titulos.indexOf(guardado[k]) : -1; };
+      var col = {
+        cliente: porTitulo('cliente'), descripcion: porTitulo('descripcion'), cantidad: porTitulo('cantidad'),
+        fecha: porTitulo('fecha'), comprobante: porTitulo('comprobante')
+      };
+      if (col.cliente < 0) col.cliente = adivinarColumna(titulos, ['razon social', 'cliente', 'nombre', 'denominacion'], ['cod', 'cuit', 'nro', 'num']);
+      if (col.descripcion < 0) col.descripcion = adivinarColumna(titulos, ['descripcion', 'articulo', 'producto', 'detalle'], ['cod']);
+      if (col.cantidad < 0) col.cantidad = adivinarColumna(titulos, ['cantidad', 'cant', 'bolsas', 'unidades']);
+      if (col.fecha < 0) col.fecha = adivinarColumna(titulos, ['fecha']);
+      if (col.comprobante < 0) col.comprobante = adivinarColumna(titulos, ['comprobante', 'factura', 'numero', 'nro']);
+
+      var opts = '<option value="-1">— elegir —</option>' + titulos.map(function (t, i) {
+        return '<option value="' + i + '">' + esc(t) + '</option>';
+      }).join('');
+      $$('#form-imp [data-col]').forEach(function (s) {
+        s.innerHTML = opts.replace('— elegir —', s.required ? '— elegir —' : '— no usar —');
+        s.value = String(col[s.dataset.col]);
+      });
+      $('#imp-archivo').textContent = 'Archivo: ' + archivo.name + ' · ' + imp.datos.length + ' filas';
+      $('#imp-solo-problemas').checked = false;
+      armarImportacion();
+      $('#dlg-imp').showModal();
+    }, true);
+  });
+
+  function columnaElegida(k) { return Number($('#form-imp [data-col="' + k + '"]').value); }
+
+  function armarImportacion() {
+    var c = {};
+    ['cliente', 'descripcion', 'cantidad', 'fecha', 'comprobante'].forEach(function (k) { c[k] = columnaElegida(k); });
+    var celda = function (f, k) { return c[k] >= 0 ? f[c[k]] : ''; };
+    imp.filas = [];
+    if (c.cliente < 0 || c.descripcion < 0 || c.cantidad < 0) { renderImportacion(); return; }
+    imp.datos.forEach(function (f) {
+      var cli = String(celda(f, 'cliente') == null ? '' : celda(f, 'cliente')).trim();
+      var desc = String(celda(f, 'descripcion') == null ? '' : celda(f, 'descripcion')).trim();
+      var cant = numeroAR(celda(f, 'cantidad'));
+      if (!cli && !desc) return;
+      var h = detectarHibrido(desc);
+      var banda = '';
+      if (h && h.grano === 'Girasol') banda = bandaGirasol(desc);
+      else if (h) banda = 'Sin banda';
+      imp.filas.push({
+        cliente: cli, desc: desc, cantidad: cant,
+        fecha: fechaISO(celda(f, 'fecha')) || hoy(),
+        comprobante: String(celda(f, 'comprobante') == null ? '' : celda(f, 'comprobante')).trim(),
+        hibridoId: h ? h.id : '', banda: banda, auto: !!h
+      });
+    });
+    imp.filas.forEach(function (r) { r.repetida = yaImportada(r); r.importar = !!r.hibridoId && !r.repetida; });
+    renderImportacion();
+  }
+
+  function claveFila(r) {
+    return [norm(r.cliente), norm(r.desc), r.cantidad, r.fecha, norm(r.comprobante)].join('|');
+  }
+
+  function yaImportada(r) {
+    var k = claveFila(r);
+    return db.movimientos.some(function (m) { return m.origen === k; });
+  }
+
+  function problemaFila(r) {
+    if (r.repetida) return 'Ya importada antes';
+    if (!r.hibridoId) return 'Sin híbrido';
+    if (!r.cliente) return 'Sin cliente';
+    if (!(r.cantidad > 0)) return 'Cantidad inválida';
+    if (!r.banda) return 'Falta banda';
+    return '';
+  }
+
+  function renderImportacion() {
+    var t = $('#imp-tabla');
+    if (!imp.filas.length) {
+      t.innerHTML = '<tr><td class="vacio">Elegí las columnas de Cliente, Descripción y Cantidad para ver las ventas.</td></tr>';
+      $('#imp-resumen').innerHTML = '';
+      $('#imp-confirmar').textContent = 'Importar';
+      return;
+    }
+    var solo = $('#imp-solo-problemas').checked;
+    var opcH = '<option value="">— no es un híbrido cargado —</option>' + ordenarHibridos(db.hibridos).map(function (h) {
+      return '<option value="' + h.id + '">' + esc(h.hibrido + ' · ' + h.semillero + ' (' + h.grano + ')') + '</option>';
+    }).join('');
+    var opcB = '<option value="">Elegir…</option>' + BANDAS.map(function (b) { return '<option>' + b + '</option>'; }).join('');
+    var html = '<thead><tr><th></th><th>Cliente</th><th>Descripción en Algoritmo</th><th>Híbrido</th><th>Banda</th><th class="num">Bolsas</th><th>Fecha</th><th>Estado</th></tr></thead><tbody>';
+    imp.filas.forEach(function (r, i) {
+      var prob = problemaFila(r);
+      if (solo && !prob) return;
+      var clienteNuevo = r.cliente && !db.clientes.some(function (c) { return norm(c.nombre) === norm(r.cliente); });
+      html += '<tr class="' + (!r.importar ? 'omitida' : prob ? 'revisar' : '') + '">' +
+        '<td><input type="checkbox" data-i="' + i + '" data-k="importar"' + (r.importar ? ' checked' : '') + '></td>' +
+        '<td>' + esc(r.cliente) + (clienteNuevo && r.importar ? ' <span class="etq warn">cliente nuevo</span>' : '') + '</td>' +
+        '<td class="desc">' + esc(r.desc) + '</td>' +
+        '<td>' + (r.hibridoId || r.elegir || pareceSemilla(r.desc)
+          ? '<select data-i="' + i + '" data-k="hibridoId">' + opcH.replace('value="' + r.hibridoId + '"', 'value="' + r.hibridoId + '" selected') + '</select>'
+          : '<button type="button" class="mini" data-elegir="' + i + '">Elegir híbrido</button>') + '</td>' +
+        '<td><select data-i="' + i + '" data-k="banda">' + opcB.replace('<option>' + r.banda + '</option>', '<option selected>' + r.banda + '</option>') + '</select></td>' +
+        '<td class="num">' + (isNaN(r.cantidad) ? '?' : num(r.cantidad)) + '</td>' +
+        '<td>' + fechaTxt(r.fecha) + '</td>' +
+        '<td>' + (prob ? '<span class="etq warn">' + prob + '</span>' : '<span class="etq in">OK</span>') + '</td></tr>';
+    });
+    t.innerHTML = html + '</tbody>';
+
+    var listas = imp.filas.filter(function (r) { return r.importar && !problemaFila(r); }).length;
+    var marcadasMal = imp.filas.filter(function (r) { return r.importar && problemaFila(r); }).length;
+    var sinH = imp.filas.filter(function (r) { return !r.hibridoId; }).length;
+    var rep = imp.filas.filter(function (r) { return r.repetida; }).length;
+    $('#imp-resumen').innerHTML =
+      '<span class="etq in">' + listas + ' listas para importar</span>' +
+      (marcadasMal ? '<span class="etq warn">' + marcadasMal + ' marcadas con datos a completar</span>' : '') +
+      (sinH ? '<span class="etq">' + sinH + ' sin híbrido reconocido (no se importan)</span>' : '') +
+      (rep ? '<span class="etq">' + rep + ' ya importadas antes</span>' : '');
+    $('#imp-confirmar').textContent = 'Importar ' + listas + ' ventas';
+  }
+
+  // Para no llenar la pantalla de listas, solo se muestra el selector en filas que parecen semilla.
+  function pareceSemilla(desc) {
+    var t = norm(desc);
+    if (granoEnTexto(desc) || t.indexOf('semilla') >= 0) return true;
+    return semilleros().some(function (sm) { var n = norm(sm); return n.length > 2 && t.indexOf(n) >= 0; });
+  }
+
+  $('#imp-tabla').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-elegir]');
+    if (!b) return;
+    imp.filas[Number(b.dataset.elegir)].elegir = true;
+    renderImportacion();
+  });
+
+  $$('#form-imp [data-col]').forEach(function (s) { s.addEventListener('change', armarImportacion); });
+  $('#imp-solo-problemas').addEventListener('change', renderImportacion);
+
+  $('#imp-tabla').addEventListener('change', function (e) {
+    var el = e.target, r = imp.filas[Number(el.dataset.i)];
+    if (!r) return;
+    if (el.dataset.k === 'importar') r.importar = el.checked;
+    if (el.dataset.k === 'hibridoId') {
+      r.hibridoId = el.value;
+      var h = hibrido(el.value);
+      if (h && !r.banda) r.banda = h.grano === 'Girasol' ? bandaGirasol(r.desc) : 'Sin banda';
+      r.importar = !!el.value;
+    }
+    if (el.dataset.k === 'banda') r.banda = el.value;
+    renderImportacion();
+  });
+
+  $('#form-imp').addEventListener('submit', function (e) {
+    var listas = imp.filas.filter(function (r) { return r.importar && !problemaFila(r); });
+    var malas = imp.filas.filter(function (r) { return r.importar && problemaFila(r); }).length;
+    if (!listas.length) { e.preventDefault(); aviso('No hay ventas listas para importar.', true); return; }
+    if (malas && !confirm(malas + ' filas marcadas tienen datos a completar y no se van a importar. ¿Seguir con las ' + listas.length + ' que están bien?')) {
+      e.preventDefault();
+      return;
+    }
+    // Recordar qué columnas se usaron, para la próxima vez.
+    var mapeo = {};
+    ['cliente', 'descripcion', 'cantidad', 'fecha', 'comprobante'].forEach(function (k) {
+      var i = columnaElegida(k);
+      if (i >= 0) mapeo[k] = imp.titulos[i];
+    });
+    try { localStorage.setItem(CLAVE_MAPEO, JSON.stringify(mapeo)); } catch (err) { /* no es grave */ }
+
+    var tipo = $('#imp-tipo').value, nuevos = 0, ahora = Date.now();
+    listas.forEach(function (r, i) {
+      var c = db.clientes.find(function (x) { return norm(x.nombre) === norm(r.cliente); });
+      if (!c) {
+        c = { id: nuevoId(), nombre: r.cliente, cuit: '', localidad: '', telefono: '', correo: '' };
+        db.clientes.push(c);
+        nuevos++;
+      }
+      db.movimientos.push({
+        id: nuevoId(), creado: ahora + i, clase: 'salida', tipo: tipo, fecha: r.fecha,
+        clienteId: c.id, hibridoId: r.hibridoId, banda: r.banda, cantidad: r.cantidad,
+        precio: null, moneda: 'USD', comprobante: r.comprobante,
+        obs: 'Importado de Algoritmo: ' + r.desc, origen: claveFila(r)
+      });
+    });
+    guardar();
+    refrescar();
+    alert('Se importaron ' + listas.length + ' ' + (tipo === 'Venta' ? 'ventas' : 'reservas') + '.' +
+      (nuevos ? '\nSe agregaron ' + nuevos + ' clientes nuevos.' : ''));
   });
 
   // ---------- Filtros de reportes ----------
