@@ -134,6 +134,14 @@
     <section id="sec-reporte" class="seccion">
       <h2>Reporte de stock (ficha por híbrido)</h2>
       <div class="panel-filtros" data-reporte="reporte"></div>
+      <div class="formato">
+        <label>Formato del reporte
+          <select id="formato-reporte">
+            <option value="detalle">Con detalle de movimientos (ficha)</option>
+            <option value="totales">Solo totales: ingresado, salido y saldo</option>
+          </select>
+        </label>
+      </div>
       <div class="barra">
         <button class="btn" id="gen-reporte">Generar reporte</button>
         <button class="btn btn-sec" data-imprimir="reporte">Imprimir / PDF</button>

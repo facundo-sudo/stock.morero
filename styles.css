@@ -180,6 +180,9 @@ tbody tr:hover { background: #fafafa; }
 td.num, th.num { text-align: right; white-space: nowrap; }
 td.acc { white-space: nowrap; text-align: right; }
 .vacio { padding: 18px; text-align: center; color: var(--gris); }
+.flecha { color: var(--bordo); font-weight: 700; }
+tr.debajo td { border-top-color: transparent; }
+tr.debajo td:first-child { color: var(--gris); }
 .neg { color: var(--bordo); font-weight: 700; }
 .etq {
   display: inline-block;
@@ -219,6 +222,8 @@ td.acc { white-space: nowrap; text-align: right; }
 .chk-linea input { width: auto; }
 
 /* Reportes */
+.formato { margin-bottom: 10px; }
+.formato label { display: flex; flex-direction: column; gap: 4px; font-size: .9rem; color: var(--gris); max-width: 420px; }
 .reporte { margin-top: 12px; }
 .reporte h4 {
   margin: 18px 0 6px;
@@ -232,6 +237,7 @@ td.acc { white-space: nowrap; text-align: right; }
 .reporte .ficha h4 { margin: 0; border-radius: 0; }
 .reporte .ficha .tabla-cont { border: 0; border-radius: 0; }
 .reporte tr.sub td { background: var(--gris-claro); font-weight: 600; }
+.reporte tr.grano td { background: var(--bordo); color: #fff; font-weight: 700; }
 .reporte tr.total td { background: var(--bordo-claro); font-weight: 700; color: var(--bordo-osc); }
 .reporte .pie-ficha { padding: 8px 10px; font-size: .9rem; color: var(--gris); border-top: 1px solid var(--gris-claro); }
 .reporte .pie-ficha b { color: var(--bordo); }
@@ -331,7 +337,7 @@ dialog label small { font-weight: 400; display: inline; }
 @media print {
   @page { margin: 12mm; }
   body { background: #fff; font-size: 11px; }
-  .encabezado, .menu, .barra, .panel-filtros, .ayuda, .toast, dialog, .seccion h2 { display: none !important; }
+  .encabezado, .menu, .barra, .panel-filtros, .formato, .ayuda, .toast, dialog, .seccion h2 { display: none !important; }
   main { padding: 0; max-width: none; }
   .seccion { display: none !important; }
   .seccion.imprimir { display: block !important; }
@@ -348,7 +354,7 @@ dialog label small { font-weight: 400; display: inline; }
   body { display: flex; flex-direction: column; }
   .tabla-cont { overflow: visible; border: 0; }
   th { background: var(--gris) !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .reporte h4, .reporte tr.sub td, .reporte tr.total td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .reporte h4, .reporte tr.sub td, .reporte tr.total td, .reporte tr.grano td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .ficha { break-inside: avoid; }
   tr { break-inside: avoid; }
   td.acc, th.acc { display: none; }

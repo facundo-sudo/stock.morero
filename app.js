@@ -194,6 +194,36 @@
     return e === undefined ? Number(m.cantidad || 0) : e;
   }
 
+  function porFecha(a, b) { return (a.fecha || '').localeCompare(b.fecha || '') || (a.creado || 0) - (b.creado || 0); }
+
+  // Ordena dejando los comprobantes vinculados (pedido, remito, factura) uno debajo del otro, aunque tengan
+  // fechas distintas. Cada operación se ubica por su primer comprobante (recientes: por el último).
+  var DEBAJO = new WeakSet(); // operaciones que se muestran debajo del primer comprobante de su grupo
+  function debajo(m) { return DEBAJO.has(m); }
+
+  function ordenarAgrupados(lista, recientesPrimero) {
+    var info = {}, clave = new Map();
+    lista.forEach(function (m) {
+      var g = grupoDe(m), k = g && g.miembros.length > 1 ? claveGrupo(m) : m.id;
+      var i = info[k] = info[k] || { primera: m.fecha || '', ultima: m.fecha || '', creado: m.creado || 0 };
+      if ((m.fecha || '') < i.primera) i.primera = m.fecha || '';
+      if ((m.fecha || '') > i.ultima) i.ultima = m.fecha || '';
+      clave.set(m, k);
+    });
+    var res = lista.slice().sort(function (a, b) {
+      var ka = clave.get(a), kb = clave.get(b), ia = info[ka], ib = info[kb];
+      if (ka !== kb) {
+        var c = recientesPrimero ? ib.ultima.localeCompare(ia.ultima) : ia.primera.localeCompare(ib.primera);
+        return c || (recientesPrimero ? ib.creado - ia.creado : ia.creado - ib.creado) || (ka < kb ? -1 : 1);
+      }
+      return porFecha(a, b);
+    });
+    res.forEach(function (m, i) {
+      if (i > 0 && clave.get(res[i - 1]) === clave.get(m)) DEBAJO.add(m); else DEBAJO.delete(m);
+    });
+    return res;
+  }
+
   // Otras operaciones vinculadas a esta.
   function hijos(m) {
     var g = grupoDe(m);
@@ -581,7 +611,8 @@
       var h = hibrido(m.hibridoId), c = cliente(m.clienteId);
       var texto = nombreHibrido(h) + ' ' + (c ? c.nombre : '') + ' ' + (m.obs || '') + ' ' + (m.comprobante || '');
       return (!tipo || m.tipo === tipo) && (!q || norm(texto).indexOf(q) >= 0) && (!soloRemitir || aRemitir(m) > 0);
-    }).sort(function (a, b) { return (b.fecha || '').localeCompare(a.fecha || '') || (b.creado || 0) - (a.creado || 0); });
+    });
+    lista = ordenarAgrupados(lista, true);
 
     var cab = '<thead><tr><th>Fecha</th><th>Tipo</th>' + (ing ? '' : '<th>Cliente</th>') +
       '<th>Grano</th><th>Semillero</th><th>Híbrido</th><th>Banda</th><th class="num">Bolsas</th><th class="num">' + (ing ? 'A recibir' : 'A remitir') + '</th><th class="num">Precio</th><th>Comprob.</th><th>Obs.</th><th class="acc"></th></tr></thead>';
@@ -589,7 +620,8 @@
     t.innerHTML = cab + '<tbody>' + (lista.length ? lista.map(function (m) {
       var h = hibrido(m.hibridoId) || {}, c = cliente(m.clienteId);
       var ar = aRemitir(m), vin = textoVinculo(m);
-      return '<tr><td>' + fechaTxt(m.fecha) + '</td><td><span class="etq ' + (m.clase === 'ingreso' ? 'in' : 'out') + '">' + esc(m.tipo) + '</span>' +
+      return '<tr' + (debajo(m) ? ' class="debajo"' : '') + '><td>' + fechaTxt(m.fecha) + '</td><td>' + (debajo(m) ? '<span class="flecha">↳</span> ' : '') +
+        '<span class="etq ' + (m.clase === 'ingreso' ? 'in' : 'out') + '">' + esc(m.tipo) + '</span>' +
         (m.doc ? ' <small>' + esc(m.doc) + '</small>' : '') + '</td>' +
         (ing ? '' : '<td>' + esc(c ? c.nombre : '(cliente borrado)') + '</td>') +
         '<td>' + esc(h.grano) + '</td><td>' + esc(h.semillero) + '</td><td><b>' + esc(h.hibrido) + '</b></td><td>' + esc(m.banda) + '</td>' +
@@ -1551,8 +1583,7 @@
     var f = filtros.reporte;
     return hibridosFiltrados(f).map(function (h) {
       var saldo = 0;
-      var movs = db.movimientos.filter(function (m) { return m.hibridoId === h.id && (!f.banda || m.banda === f.banda); })
-        .sort(function (a, b) { return (a.fecha || '').localeCompare(b.fecha || '') || (a.creado || 0) - (b.creado || 0); })
+      var movs = ordenarAgrupados(db.movimientos.filter(function (m) { return m.hibridoId === h.id && (!f.banda || m.banda === f.banda); }), false)
         .map(function (m) {
           var ing = m.clase === 'ingreso' ? efecto(m) : 0;
           var sal = m.clase === 'salida' ? efecto(m) : 0;
@@ -1565,12 +1596,65 @@
             nota: notas.filter(Boolean).join(' · ')
           };
         });
+      var pend = function (ms, clase) {
+        return ms.reduce(function (s, x) { var a = x.m.clase === clase ? aRemitir(x.m) : null; return s + (a > 0 ? a : 0); }, 0);
+      };
       var porBanda = BANDAS.map(function (b) {
         var ms = movs.filter(function (x) { return x.m.banda === b; });
-        return { banda: b, hay: ms.length > 0, saldo: ms.reduce(function (s, x) { return s + x.ing - x.sal; }, 0) };
+        var ing = ms.reduce(function (s, x) { return s + x.ing; }, 0), sal = ms.reduce(function (s, x) { return s + x.sal; }, 0);
+        return { banda: b, hay: ms.length > 0, ing: ing, sal: sal, saldo: ing - sal, arec: pend(ms, 'ingreso'), arem: pend(ms, 'salida') };
       }).filter(function (x) { return x.hay; });
       return { h: h, movs: movs, saldo: saldo, porBanda: porBanda };
     });
+  }
+
+  // Formato del reporte: con detalle de movimientos o solo totales (se recuerda en este navegador).
+  var CLAVE_FORMATO = 'morero_formato_reporte';
+  try { $('#formato-reporte').value = localStorage.getItem(CLAVE_FORMATO) || 'detalle'; } catch (err) { /* no es grave */ }
+  $('#formato-reporte').addEventListener('change', function () {
+    try { localStorage.setItem(CLAVE_FORMATO, this.value); } catch (err) { /* no es grave */ }
+    if ($('#out-reporte').innerHTML) $('#gen-reporte').click();
+  });
+  function soloTotales() { return $('#formato-reporte').value === 'totales'; }
+
+  var COLS_TOT = ['Total ingresado', 'Total salido', 'Saldo', 'Saldo a recibir', 'Saldo a remitir'];
+
+  // Una fila por híbrido y banda (o una sola si el híbrido no tiene movimientos).
+  function filasTotales(fichas) {
+    var filas = [];
+    fichas.forEach(function (x) {
+      var bandas = x.porBanda.length ? x.porBanda : [{ banda: filtros.reporte.banda || '—', ing: 0, sal: 0, saldo: 0, arec: 0, arem: 0 }];
+      bandas.forEach(function (b) { filas.push({ h: x.h, banda: b.banda, v: [b.ing, b.sal, b.saldo, b.arec, b.arem] }); });
+    });
+    return filas;
+  }
+
+  function sumarTot(filas) {
+    return COLS_TOT.map(function (_, i) { return filas.reduce(function (s, f) { return s + f.v[i]; }, 0); });
+  }
+
+  function renderTotales(fichas) {
+    var filas = filasTotales(fichas);
+    var celdas = function (v) {
+      return v.map(function (n, i) { return '<td class="num' + (i === 2 && n < 0 ? ' neg' : '') + '">' + num(n) + '</td>'; }).join('');
+    };
+    var cab = '<thead><tr><th>Semillero</th><th>Híbrido</th><th>Banda</th>' +
+      COLS_TOT.map(function (c) { return '<th class="num">' + c + '</th>'; }).join('') + '</tr></thead>';
+    // Una sola tabla, para que las columnas queden alineadas también al imprimir.
+    var html = '<p class="meta">' + esc(descripcionFiltro(filtros.reporte)) + ' · Solo totales · Cantidades en bolsas</p>' +
+      '<div class="tabla-cont"><table>' + cab + '<tbody>';
+    var granos = GRANOS.filter(function (g) { return filas.some(function (f) { return f.h.grano === g; }); });
+    granos.forEach(function (g) {
+      var fg = filas.filter(function (f) { return f.h.grano === g; });
+      html += '<tr class="grano"><td colspan="8">' + esc(g) + '</td></tr>' +
+        fg.map(function (f) {
+          return '<tr><td>' + esc(f.h.semillero) + '</td><td><b>' + esc(f.h.hibrido) + '</b></td><td>' + esc(f.banda) + '</td>' + celdas(f.v) + '</tr>';
+        }).join('') +
+        '<tr class="sub"><td colspan="3">Total ' + esc(g) + '</td>' + celdas(sumarTot(fg)) + '</tr>';
+    });
+    if (granos.length > 1) html += '<tr class="total"><td colspan="3">Total general</td>' + celdas(sumarTot(filas)) + '</tr>';
+    html += '</tbody></table></div>';
+    $('#out-reporte').innerHTML = html;
   }
 
   $('#gen-reporte').addEventListener('click', function () {
@@ -1578,6 +1662,7 @@
     datosFicha = fichas;
     var out = $('#out-reporte');
     if (!fichas.length) { out.innerHTML = '<p class="vacio">No hay híbridos para ese filtro.</p>'; return; }
+    if (soloTotales()) { renderTotales(fichas); return; }
     var html = '<p class="meta">' + esc(descripcionFiltro(filtros.reporte)) + ' · Cantidades en bolsas</p>';
     var totalGeneral = 0;
     GRANOS.forEach(function (g) {
@@ -1593,7 +1678,8 @@
           html += '<div class="tabla-cont"><table><thead><tr><th>Fecha</th><th>Operación</th><th>Proveedor / Cliente</th><th>Banda</th>' +
             '<th class="num">Bolsas del comprobante</th><th class="num">Ingreso stock</th><th class="num">Salida stock</th><th class="num">Saldo</th><th class="num">Precio</th><th>Comprob.</th><th>Obs.</th></tr></thead><tbody>' +
             x.movs.map(function (r) {
-              return '<tr><td>' + fechaTxt(r.m.fecha) + '</td><td><span class="etq ' + (r.m.clase === 'ingreso' ? 'in' : 'out') + '">' + esc(r.m.tipo) + '</span>' +
+              return '<tr' + (debajo(r.m) ? ' class="debajo"' : '') + '><td>' + fechaTxt(r.m.fecha) + '</td><td>' +
+                (debajo(r.m) ? '<span class="flecha">↳</span> ' : '') + '<span class="etq ' + (r.m.clase === 'ingreso' ? 'in' : 'out') + '">' + esc(r.m.tipo) + '</span>' +
                 (r.m.doc ? ' <small>' + esc(r.m.doc) + '</small>' : '') + '</td>' +
                 '<td>' + esc(r.quien) + '</td><td>' + esc(r.m.banda) + '</td><td class="num">' + num(r.m.cantidad) + '</td>' +
                 '<td class="num">' + (r.m.clase === 'ingreso' ? num(r.ing) : '') + '</td><td class="num">' + (r.m.clase === 'salida' ? num(r.sal) : '') + '</td>' +
@@ -1621,6 +1707,20 @@
   $('#xls-reporte').addEventListener('click', function () {
     var fichas = datosFicha || calcularFichas();
     if (!fichas.length) { aviso('No hay datos para exportar.', true); return; }
+    if (soloTotales()) {
+      var filas = filasTotales(fichas);
+      var tot = [['Reporte de stock (totales) — MORERO Semillas y Cereales S.A.'], [descripcionFiltro(filtros.reporte)], [],
+        ['Grano', 'Semillero', 'Híbrido', 'Banda'].concat(COLS_TOT)];
+      GRANOS.forEach(function (g) {
+        var fg = filas.filter(function (f) { return f.h.grano === g; });
+        if (!fg.length) return;
+        fg.forEach(function (f) { tot.push([g, f.h.semillero, f.h.hibrido, f.banda].concat(f.v)); });
+        tot.push(['Total ' + g, '', '', ''].concat(sumarTot(fg)));
+      });
+      tot.push(['Total general', '', '', ''].concat(sumarTot(filas)));
+      bajarExcel('reporte-stock-totales-' + hoy() + '.xlsx', [{ nombre: 'Reporte de stock', filas: tot }]);
+      return;
+    }
     var aoa = [['Reporte de stock — MORERO Semillas y Cereales S.A.'], [descripcionFiltro(filtros.reporte)], [],
       ['Grano', 'Semillero', 'Híbrido', 'Fecha', 'Operación', 'Proveedor / Cliente', 'Banda', 'Bolsas del comprobante', 'Ingreso stock', 'Salida stock', 'Saldo', 'Precio', 'Moneda', 'Comprobante', 'Vínculo / saldo a remitir', 'Observaciones']];
     fichas.forEach(function (x) {
@@ -1641,7 +1741,8 @@
       var r = b.dataset.imprimir;
       $('#gen-' + r).click();
       var sec = $('#sec-' + r);
-      $('#titulo-impresion').textContent = r === 'posicion' ? 'Posición comercial' : 'Reporte de stock';
+      $('#titulo-impresion').textContent = r === 'posicion' ? 'Posición comercial'
+        : 'Reporte de stock' + (soloTotales() ? ' (totales)' : ' (detalle de movimientos)');
       $('#fecha-impresion').textContent = descripcionFiltro(filtros[r]);
       sec.classList.add('imprimir');
       window.print();
