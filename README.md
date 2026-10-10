@@ -22,6 +22,11 @@ Página web para llevar el stock de semillas (girasol, maíz y sorgo): híbridos
        la vista previa pregunta si corresponde a esa operación. Pedido, remitos y factura quedan vinculados como una sola
        operación: el stock se descuenta una sola vez (lo mayor entre pedido, remitido y facturado) y se muestra el
        **saldo a remitir** (ej.: factura 100, remito 50 → la factura queda en 100 con saldo a remitir 50).
+     - Cuando hay una opción clara (una sola operación anterior, o la que coincide justo con la cantidad, o varias que
+       juntas suman la cantidad, como una factura que cubre dos remitos) la respuesta ya viene marcada como «sugerido».
+       Si queda alguna pregunta sin responder, no se importa nada hasta responderla.
+     - Ejemplo: factura 75 + remito 75 → el stock suma 75 una sola vez; la factura figura por 75 con saldo a recibir 0.
+       Una factura sin remito suma stock y queda con saldo a recibir (pendiente en físico).
      - Los clientes que no existen se agregan solos.
      - **Sin duplicados**: cada renglón se identifica por código de operación + comprobante + cliente + descripción
        (sin mirar la cantidad). Si ya estaba cargado con la misma cantidad, no se vuelve a cargar; si la cantidad cambió

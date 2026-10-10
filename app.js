@@ -1013,7 +1013,35 @@
     });
     revisarCargadas();
     imp.filas.forEach(function (r) { r.importar = !!r.hibridoId && !r.repetida; });
+    responderUnicas(true);
     renderImportacion();
+  }
+
+  // Contesta «Sí» en las filas que tienen una sola operación anterior posible (quedan marcadas como sugeridas).
+  function responderUnicas(sugerido) {
+    var hechas = 0;
+    for (var vuelta = 0; vuelta < imp.filas.length; vuelta++) {
+      calcularVinculos();
+      var elegido = null;
+      var r = imp.filas.find(function (x) { return !x.vinculo && (elegido = sugerencia(x)); });
+      if (!r) break;
+      r.vinculo = elegido;
+      r.sugerido = sugerido;
+      hechas++;
+    }
+    return hechas;
+  }
+
+  // Una sola opción; o, si hay varias, la que coincide justo con la cantidad (una sola, o todas juntas).
+  function sugerencia(r) {
+    var c = r.candidatos || [];
+    if (!c.length) return '';
+    var individuales = c.filter(function (x) { return x.clave.indexOf('todas:') !== 0; });
+    if (individuales.length === 1) return individuales[0].clave;
+    var justas = individuales.filter(function (x) { return x.pend === r.cantidad; });
+    if (justas.length === 1) return justas[0].clave;
+    var todas = c.find(function (x) { return x.clave.indexOf('todas:') === 0; });
+    return todas && todas.pend === r.cantidad ? todas.clave : '';
   }
 
   // Identifica un renglón de Algoritmo sin mirar la cantidad: operación + comprobante + cliente + descripción.
@@ -1094,15 +1122,34 @@
       if (!r.importar || problemaBasico(r) || !k || r.existenteId) { r.vinculo = ''; return; }
       if (k === 'REM' || k === 'FAC') {
         r.candidatos = bolsa.filter(function (b) {
-          return mismaEntidad(b, r) && b.hibridoId === r.hibridoId && b.banda === r.banda && saldoPara(k, b) > 0;
+          return !b.unidoA && mismaEntidad(b, r) && b.hibridoId === r.hibridoId && b.banda === r.banda && saldoPara(k, b) > 0;
         }).map(function (b) { return { clave: b.clave, texto: b.texto, pend: saldoPara(k, b) }; });
+        // Ej.: una factura que cubre varios remitos anteriores.
+        if (r.candidatos.length > 1) {
+          r.candidatos.push({
+            clave: 'todas:' + r.candidatos.map(function (c) { return c.clave; }).join(','),
+            texto: 'todas las anteriores (' + r.candidatos.map(function (c) { return c.texto; }).join(' | ') + ')',
+            pend: r.candidatos.reduce(function (t, c) { return t + c.pend; }, 0)
+          });
+        }
       } else {
         r.vinculo = '';
       }
       if (r.vinculo && r.vinculo !== 'nuevo' && !r.candidatos.some(function (b) { return b.clave === r.vinculo; })) r.vinculo = '';
       var texto = D[r.doc].nombre + (r.comprobante ? ' ' + r.comprobante : '') + ' del ' + fechaTxt(r.fecha) + ' (de este archivo)';
       if (r.vinculo && r.vinculo !== 'nuevo') {
-        var b = bolsa.find(function (x) { return x.clave === r.vinculo; });
+        var b;
+        if (r.vinculo.indexOf('todas:') === 0) {
+          // Se juntan las operaciones elegidas en una sola.
+          var partes = r.vinculo.slice(6).split(',').map(function (c) { return bolsa.find(function (x) { return x.clave === c; }); });
+          b = partes[0];
+          partes.slice(1).forEach(function (o) {
+            b.PED += o.PED; b.REM += o.REM; b.FAC += o.FAC; b.texto += ' + ' + o.texto;
+            o.unidoA = b.clave;
+          });
+        } else {
+          b = bolsa.find(function (x) { return x.clave === r.vinculo; });
+        }
         var antes = Math.max(b.PED, b.REM, b.FAC);
         b[k] += r.cantidad;
         r.descuenta = Math.max(b.PED, b.REM, b.FAC) - antes;
@@ -1156,7 +1203,7 @@
           '<option value="nuevo"' + (r.vinculo === 'nuevo' ? ' selected' : '') + '>No, es nueva (' + mueve + ' stock)</option>' +
           r.candidatos.map(function (b) {
             return '<option value="' + b.clave + '"' + (r.vinculo === b.clave ? ' selected' : '') + '>Sí: ' + esc(b.texto) + ' · saldo ' + num(b.pend) + ' bls.</option>';
-          }).join('') + '</select>' +
+          }).join('') + '</select>' + (r.sugerido && r.vinculo ? ' <span class="etq">sugerido</span>' : '') +
           (r.vinculo && r.vinculo !== 'nuevo' ? '<br><small>' + (r.descuenta ? (compras ? 'Suma ' : 'Descuenta ') + num(r.descuenta) + ' bls. (excede el saldo)'
             : 'No ' + mueve + ' stock (ya contado)') + '</small>' : '');
       }
@@ -1225,16 +1272,9 @@
 
   // Contesta «Sí» en las filas que tienen una sola operación anterior posible.
   $('#imp-auto').addEventListener('click', function () {
-    var hechas = 0;
-    for (var vuelta = 0; vuelta < imp.filas.length; vuelta++) {
-      calcularVinculos();
-      var r = imp.filas.find(function (x) { return x.candidatos && x.candidatos.length === 1 && !x.vinculo; });
-      if (!r) break;
-      r.vinculo = r.candidatos[0].clave;
-      hechas++;
-    }
+    var hechas = responderUnicas(false);
     renderImportacion();
-    aviso(hechas ? 'Se respondió «Sí» en ' + hechas + ' filas. Revisalas antes de importar.' : 'No hay filas con una sola opción para responder.');
+    aviso(hechas ? 'Se respondió «Sí» en ' + hechas + ' filas. Revisalas antes de importar.' : 'No hay filas con una opción clara para responder.');
   });
 
   $('#imp-tabla').addEventListener('change', function (e) {
@@ -1254,7 +1294,7 @@
       revisarCargadas();
       if (r.repetida) r.importar = false;
     }
-    if (el.dataset.k === 'vinculo') r.vinculo = el.value;
+    if (el.dataset.k === 'vinculo') { r.vinculo = el.value; r.sugerido = false; }
     renderImportacion();
   });
 
@@ -1262,13 +1302,22 @@
     calcularVinculos();
     var listas = imp.filas.filter(function (r) { return r.importar && !problemaFila(r) && !r.cambio; });
     var actualizar = imp.filas.filter(function (r) { return r.importar && r.cambio && !problemaFila(r) && r.accion === 'actualizar'; });
+    var sinResponder = imp.filas.filter(function (r) { return r.importar && !problemaBasico(r) && problemaFila(r); }).length;
+    if (sinResponder) {
+      e.preventDefault();
+      $('#imp-solo-problemas').checked = true;
+      renderImportacion();
+      alert('Hay ' + sinResponder + ' filas con preguntas sin responder (en amarillo). Respondelas y volvé a tocar «Importar».\n' +
+        'Si alguna no la querés importar, destildala.');
+      return;
+    }
     var malas = imp.filas.filter(function (r) { return r.importar && problemaFila(r); }).length;
     if (!listas.length && !actualizar.length) {
       e.preventDefault();
       aviso(malas ? 'Faltan datos o respuestas en las filas marcadas.' : 'No hay operaciones nuevas para importar.', true);
       return;
     }
-    if (malas && !confirm(malas + ' filas marcadas tienen datos a completar o preguntas sin responder y no se van a importar. ¿Seguir con las que están bien?')) {
+    if (malas && !confirm(malas + ' filas marcadas tienen datos a completar (híbrido, banda o cantidad) y no se van a importar. ¿Seguir con las que están bien?')) {
       e.preventDefault();
       return;
     }
@@ -1282,7 +1331,13 @@
     var compras = imp.modo === 'compras', D = docsModo();
 
     // Se guardan por fecha, así una fila puede corresponder a otra anterior del mismo archivo.
-    var nuevos = 0, ahora = Date.now(), idDeFila = {}, cuenta = {};
+    var nuevos = 0, ahora = Date.now(), idDeFila = {}, cuenta = {}, redir = {};
+    // Pasa una opción de la vista previa ('m:…' guardada, 'i:…' de este archivo) a la clave de grupo actual.
+    var resolver = function (c) {
+      var k = c.indexOf('m:') === 0 ? c.slice(2) : (c.indexOf('i:') === 0 ? idDeFila[c.slice(2)] : '');
+      while (k && redir[k]) k = redir[k];
+      return k;
+    };
     var orden = imp.filas.map(function (r, i) { return i; }).sort(function (x, y) {
       return imp.filas[x].fecha.localeCompare(imp.filas[y].fecha) || x - y;
     });
@@ -1296,8 +1351,15 @@
         nuevos++;
       }
       var grupo = '';
-      if (r.vinculo && r.vinculo.indexOf('m:') === 0) grupo = r.vinculo.slice(2);
-      if (r.vinculo && r.vinculo.indexOf('i:') === 0) grupo = idDeFila[r.vinculo.slice(2)] || '';
+      if (r.vinculo && r.vinculo !== 'nuevo') {
+        var claves = (r.vinculo.indexOf('todas:') === 0 ? r.vinculo.slice(6).split(',') : [r.vinculo]).map(resolver).filter(Boolean);
+        grupo = claves[0] || '';
+        // Unir las demás operaciones elegidas al mismo grupo.
+        claves.slice(1).forEach(function (otra) {
+          db.movimientos.forEach(function (x) { if (claveGrupo(x) === otra) x.grupo = grupo; });
+          redir[otra] = grupo;
+        });
+      }
       var tipo = D[r.doc].tipo;
       var m = {
         id: nuevoId(), creado: ahora + n, clase: claseDe(tipo), tipo: tipo, doc: r.doc, fecha: r.fecha,
@@ -1529,16 +1591,16 @@
           html += '<p class="vacio">Sin operaciones.</p>';
         } else {
           html += '<div class="tabla-cont"><table><thead><tr><th>Fecha</th><th>Operación</th><th>Proveedor / Cliente</th><th>Banda</th>' +
-            '<th class="num">Ingreso</th><th class="num">Salida</th><th class="num">Saldo</th><th class="num">Precio</th><th>Comprob.</th><th>Obs.</th></tr></thead><tbody>' +
+            '<th class="num">Bolsas del comprobante</th><th class="num">Ingreso stock</th><th class="num">Salida stock</th><th class="num">Saldo</th><th class="num">Precio</th><th>Comprob.</th><th>Obs.</th></tr></thead><tbody>' +
             x.movs.map(function (r) {
               return '<tr><td>' + fechaTxt(r.m.fecha) + '</td><td><span class="etq ' + (r.m.clase === 'ingreso' ? 'in' : 'out') + '">' + esc(r.m.tipo) + '</span>' +
                 (r.m.doc ? ' <small>' + esc(r.m.doc) + '</small>' : '') + '</td>' +
-                '<td>' + esc(r.quien) + '</td><td>' + esc(r.m.banda) + '</td>' +
+                '<td>' + esc(r.quien) + '</td><td>' + esc(r.m.banda) + '</td><td class="num">' + num(r.m.cantidad) + '</td>' +
                 '<td class="num">' + (r.m.clase === 'ingreso' ? num(r.ing) : '') + '</td><td class="num">' + (r.m.clase === 'salida' ? num(r.sal) : '') + '</td>' +
                 '<td class="num' + (r.saldo < 0 ? ' neg' : '') + '">' + num(r.saldo) + '</td><td class="num">' + precioTxt(r.m) + '</td>' +
                 '<td>' + esc(r.m.comprobante) + '</td><td>' + (r.nota ? '<small class="vinc">' + esc(r.nota) + '</small><br>' : '') + esc(r.m.obs) + '</td></tr>';
             }).join('') +
-            '<tr class="total"><td colspan="4">Stock final</td><td class="num">' + num(x.movs.reduce(function (s, r) { return s + r.ing; }, 0)) +
+            '<tr class="total"><td colspan="5">Stock final</td><td class="num">' + num(x.movs.reduce(function (s, r) { return s + r.ing; }, 0)) +
             '</td><td class="num">' + num(x.movs.reduce(function (s, r) { return s + r.sal; }, 0)) +
             '</td><td class="num">' + num(x.saldo) + '</td><td colspan="3"></td></tr></tbody></table></div>';
           if (x.porBanda.length > 1) {
@@ -1560,14 +1622,14 @@
     var fichas = datosFicha || calcularFichas();
     if (!fichas.length) { aviso('No hay datos para exportar.', true); return; }
     var aoa = [['Reporte de stock — MORERO Semillas y Cereales S.A.'], [descripcionFiltro(filtros.reporte)], [],
-      ['Grano', 'Semillero', 'Híbrido', 'Fecha', 'Operación', 'Proveedor / Cliente', 'Banda', 'Ingreso', 'Salida', 'Saldo', 'Precio', 'Moneda', 'Comprobante', 'Vínculo / saldo a remitir', 'Observaciones']];
+      ['Grano', 'Semillero', 'Híbrido', 'Fecha', 'Operación', 'Proveedor / Cliente', 'Banda', 'Bolsas del comprobante', 'Ingreso stock', 'Salida stock', 'Saldo', 'Precio', 'Moneda', 'Comprobante', 'Vínculo / saldo a remitir', 'Observaciones']];
     fichas.forEach(function (x) {
       x.movs.forEach(function (r) {
         aoa.push([x.h.grano, x.h.semillero, x.h.hibrido, fechaTxt(r.m.fecha), r.m.tipo + (r.m.doc ? ' ' + r.m.doc : ''), r.quien, r.m.banda,
-          r.m.clase === 'ingreso' ? r.ing : '', r.m.clase === 'salida' ? r.sal : '', r.saldo, r.m.precio == null ? '' : r.m.precio, r.m.precio == null ? '' : (r.m.moneda === 'ARS' ? '$' : 'US$'),
+          Number(r.m.cantidad), r.m.clase === 'ingreso' ? r.ing : '', r.m.clase === 'salida' ? r.sal : '', r.saldo, r.m.precio == null ? '' : r.m.precio, r.m.precio == null ? '' : (r.m.moneda === 'ARS' ? '$' : 'US$'),
           r.m.comprobante || '', r.nota, r.m.obs || '']);
       });
-      aoa.push([x.h.grano, x.h.semillero, x.h.hibrido, '', 'STOCK FINAL', '', '', '', '', x.saldo]);
+      aoa.push([x.h.grano, x.h.semillero, x.h.hibrido, '', 'STOCK FINAL', '', '', '', '', '', x.saldo]);
       aoa.push([]);
     });
     bajarExcel('reporte-stock-' + hoy() + '.xlsx', [{ nombre: 'Reporte de stock', filas: aoa }]);
