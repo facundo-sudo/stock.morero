@@ -609,27 +609,27 @@
     }
     var lista = todos.filter(function (m) {
       var h = hibrido(m.hibridoId), c = cliente(m.clienteId);
-      var texto = nombreHibrido(h) + ' ' + (c ? c.nombre : '') + ' ' + (m.obs || '') + ' ' + (m.comprobante || '');
+      var texto = nombreHibrido(h) + ' ' + (c ? c.nombre : '') + ' ' + (m.proveedor || '') + ' ' + (m.obs || '') + ' ' + (m.comprobante || '');
       return (!tipo || m.tipo === tipo) && (!q || norm(texto).indexOf(q) >= 0) && (!soloRemitir || aRemitir(m) > 0);
     });
     lista = ordenarAgrupados(lista, true);
 
-    var cab = '<thead><tr><th>Fecha</th><th>Tipo</th>' + (ing ? '' : '<th>Cliente</th>') +
+    var cab = '<thead><tr><th>Fecha</th><th>Tipo</th>' + (ing ? '<th>Proveedor</th>' : '<th>Cliente</th>') +
       '<th>Grano</th><th>Semillero</th><th>Híbrido</th><th>Banda</th><th class="num">Bolsas</th><th class="num">' + (ing ? 'A recibir' : 'A remitir') + '</th><th class="num">Precio</th><th>Comprob.</th><th>Obs.</th><th class="acc"></th></tr></thead>';
-    var cols = ing ? 12 : 13;
+    var cols = 13;
     t.innerHTML = cab + '<tbody>' + (lista.length ? lista.map(function (m) {
       var h = hibrido(m.hibridoId) || {}, c = cliente(m.clienteId);
       var ar = aRemitir(m), vin = textoVinculo(m);
       return '<tr' + (debajo(m) ? ' class="debajo"' : '') + '><td>' + fechaTxt(m.fecha) + '</td><td>' + (debajo(m) ? '<span class="flecha">↳</span> ' : '') +
         '<span class="etq ' + (m.clase === 'ingreso' ? 'in' : 'out') + '">' + esc(m.tipo) + '</span>' +
         (m.doc ? ' <small>' + esc(m.doc) + '</small>' : '') + '</td>' +
-        (ing ? '' : '<td>' + esc(c ? c.nombre : '(cliente borrado)') + '</td>') +
+        (ing ? '<td>' + esc(m.proveedor || (m.tipo === 'Existencia inicial campaña' ? '' : h.semillero || '')) + '</td>'
+          : '<td>' + esc(c ? c.nombre : '(cliente borrado)') + '</td>') +
         '<td>' + esc(h.grano) + '</td><td>' + esc(h.semillero) + '</td><td><b>' + esc(h.hibrido) + '</b></td><td>' + esc(m.banda) + '</td>' +
         '<td class="num">' + num(m.cantidad) + '</td>' +
         '<td class="num' + (ar > 0 ? ' neg' : '') + '">' + (ar == null ? '' : num(ar)) + '</td>' +
         '<td class="num">' + precioTxt(m) + '</td><td>' + esc(m.comprobante) + '</td>' +
-        '<td>' + (m.proveedor ? '<small>Proveedor: ' + esc(m.proveedor) + '</small><br>' : '') +
-        (vin ? '<small class="vinc">' + esc(vin) + '</small><br>' : '') + esc(m.obs) + '</td>' +
+        '<td>' + (vin ? '<small class="vinc">' + esc(vin) + '</small><br>' : '') + esc(m.obs) + '</td>' +
         '<td class="acc"><button class="mini" data-edit-m="' + m.id + '">Editar</button> ' +
         '<button class="mini borrar" data-del-m="' + m.id + '">Borrar</button></td></tr>';
     }).join('') : '<tr><td colspan="' + cols + '" class="vacio">No hay coincidencias.</td></tr>') + '</tbody>';
@@ -681,10 +681,12 @@
     opciones(fMov.tipo, ing ? TIPOS_COMPRA_FORM : TIPOS_SALIDA);
     $('#tit-mov').textContent = (m ? 'Editar ' : 'Cargar ') + (ing ? 'compra / ingreso' : 'venta, pedido o devolución');
     $('#bloque-cliente').style.display = ing ? 'none' : '';
+    $('#lista-proveedores').innerHTML = proveedoresConocidos().map(function (n) { return '<option value="' + esc(n) + '">'; }).join('');
     $('#vinculo-mov').textContent = m ? textoVinculo(m) : '';
     $('#busca-hibrido-mov').value = '';
     $('#busca-cliente-mov').value = '';
     fMov.fecha.value = m ? m.fecha : hoy();
+    if (ing && !m) fMov.tipo.value = 'Compra';
     if (m) {
       fMov.tipo.value = m.tipo;
       fMov.banda.value = m.banda;
@@ -696,6 +698,11 @@
     }
     elegirCliente(m ? m.clienteId : '');
     listarHibridosMov(m ? m.hibridoId : '');
+    var hm = m ? hibrido(m.hibridoId) : null;
+    fMov.proveedor.value = m ? (m.proveedor || (hm ? hm.semillero : '')) : '';
+    provAuto = !m || !m.proveedor;
+    mostrarProveedor();
+    sugerirProveedor();
     mostrarDisponible();
     $('#dlg-mov').showModal();
     if (!ing && !m) $('#busca-cliente-mov').focus();
@@ -715,8 +722,39 @@
     if (!sel.value && lista.length === 1) sel.value = lista[0].id;
   }
 
-  $('#busca-hibrido-mov').addEventListener('input', function () { listarHibridosMov(); mostrarDisponible(); });
-  $('#sel-hibrido-mov').addEventListener('change', mostrarDisponible);
+  $('#busca-hibrido-mov').addEventListener('input', function () { listarHibridosMov(); sugerirProveedor(); mostrarDisponible(); });
+  $('#sel-hibrido-mov').addEventListener('change', function () { sugerirProveedor(); mostrarDisponible(); });
+
+  // Proveedor de las compras: por defecto el semillero del híbrido; se puede cambiar por otro.
+  var provAuto = true;   // el proveedor lo completó la página (no lo escribió el usuario)
+  var SIN_PROVEEDOR = ['Existencia inicial campaña'];
+
+  function pideProveedor() {
+    return fMov.clase.value === 'ingreso' && SIN_PROVEEDOR.indexOf(fMov.tipo.value) === -1;
+  }
+
+  function mostrarProveedor() { $('#bloque-proveedor').style.display = pideProveedor() ? '' : 'none'; }
+
+  function sugerirProveedor() {
+    if (!provAuto && fMov.proveedor.value.trim()) return;
+    var h = hibrido(fMov.hibridoId.value);
+    fMov.proveedor.value = h ? h.semillero : '';
+    provAuto = true;
+  }
+
+  function proveedoresConocidos() {
+    var vistos = {}, lista = [];
+    db.hibridos.map(function (h) { return h.semillero; })
+      .concat(db.movimientos.map(function (m) { return m.proveedor; }))
+      .forEach(function (n) {
+        n = String(n || '').trim();
+        if (n && !vistos[norm(n)]) { vistos[norm(n)] = true; lista.push(n); }
+      });
+    return lista.sort(function (a, b) { return a.localeCompare(b, 'es'); });
+  }
+
+  fMov.proveedor.addEventListener('input', function () { provAuto = false; });
+  fMov.tipo.addEventListener('change', mostrarProveedor);
   fMov.banda.addEventListener('change', mostrarDisponible);
   fMov.cantidad.addEventListener('input', mostrarDisponible);
 
@@ -779,6 +817,7 @@
     var sale = claseDe(fMov.tipo.value) === 'salida';
     if (!ing && !fMov.clienteId.value) { e.preventDefault(); aviso('Elegí un cliente.', true); return; }
     if (!fMov.hibridoId.value) { e.preventDefault(); aviso('Elegí un híbrido.', true); return; }
+    if (pideProveedor() && !fMov.proveedor.value.trim()) { e.preventDefault(); aviso('Indicá el proveedor.', true); fMov.proveedor.focus(); return; }
     var cant = Number(fMov.cantidad.value);
     if (!(cant > 0)) { e.preventDefault(); aviso('La cantidad debe ser mayor a cero.', true); return; }
     if (sale) {
@@ -793,6 +832,7 @@
       tipo: fMov.tipo.value,
       fecha: fMov.fecha.value,
       clienteId: ing ? '' : fMov.clienteId.value,
+      proveedor: pideProveedor() ? fMov.proveedor.value.trim().replace(/\s+/g, ' ') : '',
       hibridoId: fMov.hibridoId.value,
       banda: fMov.banda.value,
       cantidad: cant,

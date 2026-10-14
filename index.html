@@ -252,6 +252,14 @@
       </label>
       <select name="hibridoId" id="sel-hibrido-mov" size="5" required></select>
 
+      <div id="bloque-proveedor">
+        <label>Proveedor
+          <input name="proveedor" list="lista-proveedores" autocomplete="off" placeholder="Semillero u otro proveedor">
+        </label>
+        <p class="ayuda">Se completa con el semillero del híbrido. Si le compraste a otro proveedor, escribí su nombre.</p>
+      </div>
+      <datalist id="lista-proveedores"></datalist>
+
       <div class="dos">
         <label>Banda
           <select name="banda" required>
