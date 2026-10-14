@@ -247,18 +247,18 @@
         <div id="cliente-elegido" class="elegido"></div>
       </div>
 
-      <label>Híbrido
-        <input type="search" id="busca-hibrido-mov" placeholder="Buscar por semillero o híbrido…" autocomplete="off">
-      </label>
-      <select name="hibridoId" id="sel-hibrido-mov" size="5" required></select>
-
       <div id="bloque-proveedor">
         <label>Proveedor
           <input name="proveedor" list="lista-proveedores" autocomplete="off" placeholder="Semillero u otro proveedor">
         </label>
-        <p class="ayuda">Se completa con el semillero del híbrido. Si le compraste a otro proveedor, escribí su nombre.</p>
+        <p class="ayuda">Si lo dejás vacío, se completa con el semillero del híbrido que elijas. Si le compraste a otro proveedor, escribí su nombre.</p>
       </div>
       <datalist id="lista-proveedores"></datalist>
+
+      <label>Híbrido
+        <input type="search" id="busca-hibrido-mov" placeholder="Buscar por semillero o híbrido…" autocomplete="off">
+      </label>
+      <select name="hibridoId" id="sel-hibrido-mov" size="5" required></select>
 
       <div class="dos">
         <label>Banda
@@ -288,6 +288,11 @@
           </select>
         </label>
       </div>
+      <div id="bloque-items" hidden>
+        <button type="button" class="btn btn-sec" id="btn-agregar-item">＋ Agregar este híbrido al pedido</button>
+        <p class="ayuda">Para cargar varios híbridos del mismo proveedor: elegí híbrido, banda y cantidad, tocá «Agregar este híbrido al pedido» y seguí con el próximo. Al terminar, tocá «Guardar pedido».</p>
+        <div id="items-mov" class="items-mov"></div>
+      </div>
       <label>N° de comprobante <small>(opcional)</small>
         <input name="comprobante" autocomplete="off">
       </label>
@@ -296,7 +301,7 @@
       </label>
       <div class="acciones">
         <button type="button" class="btn btn-sec" data-cerrar>Cancelar</button>
-        <button type="submit" class="btn" value="ok">Guardar</button>
+        <button type="submit" class="btn" value="ok" id="btn-guardar-mov">Guardar</button>
       </div>
     </form>
   </dialog>

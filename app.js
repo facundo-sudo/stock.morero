@@ -701,6 +701,9 @@
     var hm = m ? hibrido(m.hibridoId) : null;
     fMov.proveedor.value = m ? (m.proveedor || (hm ? hm.semillero : '')) : '';
     provAuto = !m || !m.proveedor;
+    itemsMov = [];
+    $('#bloque-items').hidden = !(ing && !m);
+    renderItems();
     mostrarProveedor();
     sugerirProveedor();
     mostrarDisponible();
@@ -754,6 +757,68 @@
   }
 
   fMov.proveedor.addEventListener('input', function () { provAuto = false; });
+
+  // Pedido con varios híbridos del mismo proveedor (solo al cargar una compra nueva).
+  var itemsMov = [];
+
+  function lineaActual() {
+    return {
+      hibridoId: fMov.hibridoId.value,
+      banda: fMov.banda.value,
+      cantidad: Number(fMov.cantidad.value),
+      precio: fMov.precio.value === '' ? null : Number(fMov.precio.value),
+      moneda: fMov.moneda.value
+    };
+  }
+
+  function lineaEmpezada() { return !!(fMov.hibridoId.value || fMov.cantidad.value || fMov.banda.value || fMov.precio.value); }
+
+  function lineaValida(l) {
+    if (!l.hibridoId) return 'Elegí un híbrido.';
+    if (!l.banda) return 'Elegí la banda.';
+    if (!(l.cantidad > 0)) return 'La cantidad debe ser mayor a cero.';
+    return '';
+  }
+
+  function agregarItem() {
+    var l = lineaActual(), err = lineaValida(l);
+    if (err) { aviso(err, true); return; }
+    if (pideProveedor() && !fMov.proveedor.value.trim()) sugerirProveedor();
+    provAuto = false;   // con un híbrido agregado, el proveedor queda fijo para todo el pedido
+    itemsMov.push(l);
+    $('#busca-hibrido-mov').value = '';
+    listarHibridosMov('');
+    fMov.hibridoId.value = '';
+    fMov.banda.value = '';
+    fMov.cantidad.value = '';
+    fMov.precio.value = '';
+    renderItems();
+    mostrarDisponible();
+    aviso('Agregado: ' + nombreHibrido(hibrido(l.hibridoId)) + ' · ' + num(l.cantidad) + ' bolsas.');
+    $('#busca-hibrido-mov').focus();
+  }
+
+  function renderItems() {
+    var cont = $('#items-mov'), n = itemsMov.length;
+    var total = itemsMov.reduce(function (t, l) { return t + l.cantidad; }, 0);
+    cont.innerHTML = n ? itemsMov.map(function (l, i) {
+      var h = hibrido(l.hibridoId) || {};
+      return '<div class="item-mov"><span><b>' + esc(h.hibrido || '') + '</b> · ' + esc(h.grano || '') + ' · ' + esc(h.semillero || '') + ' · ' + esc(l.banda) +
+        ' · ' + num(l.cantidad) + ' bolsas' + (l.precio != null ? ' · ' + (l.moneda === 'ARS' ? '$ ' : 'US$ ') + num(l.precio) : '') + '</span>' +
+        '<button type="button" class="mini borrar" data-quitar-item="' + i + '" title="Quitar del pedido">×</button></div>';
+    }).join('') + '<p class="items-total">En el pedido: ' + n + (n === 1 ? ' híbrido' : ' híbridos') + ' · ' + num(total) + ' bolsas</p>' : '';
+    // Con híbridos agregados, la línea de abajo puede quedar vacía.
+    [fMov.hibridoId, fMov.banda, fMov.cantidad].forEach(function (c) { c.required = !n; });
+    $('#btn-guardar-mov').textContent = n ? 'Guardar pedido' : 'Guardar';
+  }
+
+  $('#btn-agregar-item').addEventListener('click', agregarItem);
+  $('#items-mov').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-quitar-item]');
+    if (!b) return;
+    itemsMov.splice(Number(b.dataset.quitarItem), 1);
+    renderItems();
+  });
   fMov.tipo.addEventListener('change', mostrarProveedor);
   fMov.banda.addEventListener('change', mostrarDisponible);
   fMov.cantidad.addEventListener('input', mostrarDisponible);
@@ -813,6 +878,7 @@
   }
 
   fMov.addEventListener('submit', function (e) {
+    if (itemsMov.length) { guardarPedido(e); return; }
     var ing = fMov.clase.value === 'ingreso';
     var sale = claseDe(fMov.tipo.value) === 'salida';
     if (!ing && !fMov.clienteId.value) { e.preventDefault(); aviso('Elegí un cliente.', true); return; }
@@ -854,6 +920,31 @@
     guardar();
     refrescar();
   });
+
+  function guardarPedido(e) {
+    var lineas = itemsMov.slice();
+    if (lineaEmpezada()) {
+      var l = lineaActual(), err = lineaValida(l);
+      if (err) { e.preventDefault(); aviso('El híbrido de abajo quedó a medias: ' + err + ' (o borrá lo que escribiste).', true); return; }
+      lineas.push(l);
+    }
+    if (pideProveedor() && !fMov.proveedor.value.trim()) { e.preventDefault(); aviso('Indicá el proveedor.', true); fMov.proveedor.focus(); return; }
+    var tipo = fMov.tipo.value, pedido = nuevoId(), total = 0;
+    lineas.forEach(function (l, i) {
+      total += l.cantidad;
+      db.movimientos.push({
+        id: nuevoId(), creado: Date.now() + i, pedido: pedido,
+        clase: claseDe(tipo), tipo: tipo, fecha: fMov.fecha.value, clienteId: '',
+        proveedor: pideProveedor() ? fMov.proveedor.value.trim().replace(/\s+/g, ' ') : '',
+        hibridoId: l.hibridoId, banda: l.banda, cantidad: l.cantidad, precio: l.precio, moneda: l.moneda,
+        comprobante: fMov.comprobante.value.trim(), obs: fMov.obs.value.trim()
+      });
+    });
+    itemsMov = [];
+    aviso(tipo + ' guardado: ' + lineas.length + ' híbridos, ' + num(total) + ' bolsas.');
+    guardar();
+    refrescar();
+  }
 
   // ---------- Importar ventas de Algoritmo ----------
   var CLAVE_MAPEO = 'morero_mapeo_algoritmo';

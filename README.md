@@ -7,6 +7,7 @@ Página web para llevar el stock de semillas (girasol, maíz y sorgo): híbridos
 1. **Híbridos**: cargá cada híbrido con su semillero y grano, o importá un Excel con las columnas *Semillero*, *Híbrido* y *Grano*.
 2. **Clientes**: cargalos a mano o importá un Excel con la columna *Nombre* (y opcionalmente CUIT, Localidad, Teléfono, Correo).
 3. **Compras**: existencia inicial de campaña, compras, pedidos y mercadería consignada (suman stock) y devoluciones a semillero (restan). Se elige banda (1, 2, 3 o sin banda) y el precio es opcional. También se indica el **proveedor**: se completa solo con el semillero del híbrido y se cambia si se compró a otro proveedor (no se pide en la existencia inicial). El listado de compras tiene la columna Proveedor y el buscador también busca por proveedor.
+   - **Pedido con varios híbridos**: al cargar una compra nueva, después del proveedor se elige híbrido, banda, cantidad (y precio) y se toca «Agregar este híbrido al pedido»; se repite con los demás híbridos y al final «Guardar pedido». Se guardan todos con el mismo tipo, fecha, proveedor y comprobante. Si el último híbrido quedó escrito sin agregar, también se guarda.
    - **Importar compras de Algoritmo (Excel)**: igual que en ventas, con columna de Proveedor en lugar de Cliente.
      Códigos: PED/OC → pedido; REM y FAC → compra; consignación (CON/RCO) → mercadería consignada; devolución (RDE/DEV) → resta stock.
      Pedido, remitos (o consignación) y factura del mismo híbrido se vinculan para sumar stock una sola vez y mostrar el **saldo a recibir**.
