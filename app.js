@@ -747,8 +747,10 @@
 
   function proveedoresConocidos() {
     var vistos = {}, lista = [];
+    // Semilleros, proveedores ya usados y la lista de Clientes (ahí también están los proveedores).
     db.hibridos.map(function (h) { return h.semillero; })
       .concat(db.movimientos.map(function (m) { return m.proveedor; }))
+      .concat(db.clientes.map(function (c) { return c.nombre; }))
       .forEach(function (n) {
         n = String(n || '').trim();
         if (n && !vistos[norm(n)]) { vistos[norm(n)] = true; lista.push(n); }
