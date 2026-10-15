@@ -95,7 +95,10 @@
       <div class="filtros">
         <input type="search" id="busca-compras" placeholder="Buscar híbrido, semillero u observación…">
         <select id="tipo-compras"><option value="">Todos los tipos</option></select>
+        <select id="quien-compras" aria-label="Proveedor"><option value="">Todos los proveedores</option></select>
+        <select id="hibrido-compras" aria-label="Híbrido"><option value="">Todos los híbridos</option></select>
       </div>
+      <p class="ayuda resumen-filtro" id="resumen-compras"></p>
       <label class="chk-linea"><input type="checkbox" id="solo-recibir"> Mostrar solo pedidos y facturas con saldo a recibir</label>
       <div class="tabla-cont"><table id="tabla-compras"></table></div>
     </section>
@@ -113,7 +116,10 @@
       <div class="filtros">
         <input type="search" id="busca-ventas" placeholder="Buscar cliente o híbrido…">
         <select id="tipo-ventas"><option value="">Todos los tipos</option></select>
+        <select id="quien-ventas" aria-label="Cliente"><option value="">Todos los clientes</option></select>
+        <select id="hibrido-ventas" aria-label="Híbrido"><option value="">Todos los híbridos</option></select>
       </div>
+      <p class="ayuda resumen-filtro" id="resumen-ventas"></p>
       <label class="chk-linea"><input type="checkbox" id="solo-remitir"> Mostrar solo facturas y pedidos con saldo a remitir</label>
       <div class="tabla-cont"><table id="tabla-ventas"></table></div>
     </section>

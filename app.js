@@ -673,15 +673,43 @@
     var t = $(ing ? '#tabla-compras' : '#tabla-ventas');
     var soloRemitir = $(ing ? '#solo-recibir' : '#solo-remitir').checked;
     var todos = db.movimientos.filter(function (m) { return enVentas(m) === !ing; });
+    var s = ing ? 'compras' : 'ventas';
+    // Filtros por cliente (o proveedor) y por híbrido: solo los que tienen operaciones.
+    var quienDe = function (m) {
+      if (!ing) { var c = cliente(m.clienteId); return c ? c.nombre : ''; }
+      var h = hibrido(m.hibridoId) || {};
+      return m.proveedor || (m.tipo === 'Existencia inicial campaña' ? '' : h.semillero || '');
+    };
+    var selQ = $('#quien-' + s), selH = $('#hibrido-' + s);
+    var quien = selQ.value, hid = selH.value;
+    var nombres = {};
+    todos.forEach(function (m) { var n = quienDe(m); if (n) nombres[norm(n)] = n; });
+    selQ.innerHTML = '<option value="">' + (ing ? 'Todos los proveedores' : 'Todos los clientes') + '</option>' +
+      Object.keys(nombres).map(function (k) { return nombres[k]; }).sort(function (a, b) { return a.localeCompare(b, 'es'); })
+        .map(function (n) { return '<option value="' + esc(norm(n)) + '">' + esc(n) + '</option>'; }).join('');
+    selQ.value = nombres[quien] ? quien : '';
+    quien = selQ.value;
+    var hs = {};
+    todos.forEach(function (m) { if (hibrido(m.hibridoId)) hs[m.hibridoId] = true; });
+    selH.innerHTML = '<option value="">Todos los híbridos</option>' + ordenarHibridos(db.hibridos.filter(function (h) { return hs[h.id]; }))
+      .map(function (h) { return '<option value="' + h.id + '">' + esc(h.hibrido + ' · ' + h.semillero + ' (' + h.grano + ')') + '</option>'; }).join('');
+    selH.value = hs[hid] ? hid : '';
+    hid = selH.value;
     if (!todos.length) {
+      $('#resumen-' + s).textContent = '';
       t.innerHTML = '<tr><td class="vacio">' + (ing ? 'Todavía no hay compras cargadas.' : 'Todavía no hay ventas ni reservas cargadas.') + '</td></tr>';
       return;
     }
     var lista = todos.filter(function (m) {
       var h = hibrido(m.hibridoId), c = cliente(m.clienteId);
       var texto = nombreHibrido(h) + ' ' + (c ? c.nombre : '') + ' ' + (m.proveedor || '') + ' ' + (m.obs || '') + ' ' + (m.comprobante || '');
-      return (!tipo || m.tipo === tipo) && (!q || norm(texto).indexOf(q) >= 0) && (!soloRemitir || aRemitir(m) > 0);
+      return (!tipo || m.tipo === tipo) && (!q || norm(texto).indexOf(q) >= 0) && (!soloRemitir || aRemitir(m) > 0) &&
+        (!quien || norm(quienDe(m)) === quien) && (!hid || m.hibridoId === hid);
     });
+    var filtrado = lista.length !== todos.length;
+    var bolsas = lista.reduce(function (t, m) { return t + (Number(m.cantidad) || 0); }, 0);
+    $('#resumen-' + s).textContent = filtrado
+      ? 'Se muestran ' + lista.length + ' de ' + todos.length + ' operaciones · ' + num(bolsas) + ' bolsas en total.' : '';
     lista = ordenarAgrupados(lista, true);
 
     var cab = '<thead><tr><th>Fecha</th><th>Tipo</th>' + (ing ? '<th>Proveedor</th>' : '<th>Cliente</th>') +
@@ -709,6 +737,8 @@
     var clase = s === 'compras' ? 'ingreso' : 'salida';
     $('#busca-' + s).addEventListener('input', function () { renderMovs(clase); });
     $('#tipo-' + s).addEventListener('change', function () { renderMovs(clase); });
+    $('#quien-' + s).addEventListener('change', function () { renderMovs(clase); });
+    $('#hibrido-' + s).addEventListener('change', function () { renderMovs(clase); });
     $(s === 'ventas' ? '#solo-remitir' : '#solo-recibir').addEventListener('change', function () { renderMovs(clase); });
     $('#tabla-' + s).addEventListener('click', function (e) {
       var b = e.target.closest('button');
