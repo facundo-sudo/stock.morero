@@ -105,6 +105,10 @@
   var timerAviso;
   function aviso(msg, error) {
     var t = $('#toast');
+    // Con una ventana abierta, el aviso va adentro de ella; si no, quedaría tapado por la ventana.
+    var abierto = document.querySelector('dialog[open]');
+    var destino = abierto || document.body;
+    if (t.parentNode !== destino) destino.appendChild(t);
     t.textContent = msg;
     t.className = 'toast ver' + (error ? ' error' : '');
     clearTimeout(timerAviso);
@@ -702,6 +706,7 @@
     fMov.proveedor.value = m ? (m.proveedor || (hm ? hm.semillero : '')) : '';
     provAuto = !m || !m.proveedor;
     itemsMov = [];
+    errorItem('');
     $('#bloque-items').hidden = !!m;
     $('#ayuda-items').textContent = 'Para cargar varios híbridos ' + (ing ? 'del mismo proveedor' : 'del mismo cliente') +
       ': elegí híbrido, banda y cantidad, tocá «Agregar este híbrido» y seguí con el próximo. Al terminar, tocá «Guardar todo».';
@@ -789,10 +794,23 @@
     return itemsMov.reduce(function (t, l) { return t + (l.hibridoId === hid && (!banda || l.banda === banda) ? l.cantidad : 0); }, 0);
   }
 
+  function errorItem(t) {
+    var p = $('#err-items');
+    p.textContent = t || '';
+    p.hidden = !t;
+    if (t) aviso(t, true);
+  }
+
   function agregarItem() {
     var l = lineaActual(), err = lineaValida(l);
-    if (err) { aviso(err, true); return; }
-    if (fMov.clase.value !== 'ingreso' && !fMov.clienteId.value) { aviso('Elegí un cliente.', true); return; }
+    if (!err && fMov.clase.value !== 'ingreso' && !fMov.clienteId.value) err = 'Elegí un cliente.';
+    if (err) {
+      errorItem('Falta completar: ' + err);
+      var campo = !l.hibridoId ? $('#busca-hibrido-mov') : !l.banda ? fMov.banda : !(l.cantidad > 0) ? fMov.cantidad : $('#busca-cliente-mov');
+      if (campo && campo.offsetParent) campo.focus();
+      return;
+    }
+    errorItem('');
     if (claseDe(fMov.tipo.value) === 'salida') {
       var disp = stock(l.hibridoId, l.banda, '') - enPedido(l.hibridoId, l.banda);
       if (l.cantidad > disp && !confirm('Hay ' + num(disp) + ' bolsas disponibles en ' + l.banda + ' y querés descontar ' + num(l.cantidad) + '.\n¿Agregar igual?')) return;

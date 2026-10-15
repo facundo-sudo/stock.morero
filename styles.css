@@ -365,3 +365,4 @@ dialog label small { font-weight: 400; display: inline; }
 .item-mov { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--borde, #ddd); border-radius: 6px; background: var(--bordo-claro); font-size: .92rem; }
 .item-mov span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .items-total { font-size: .9rem; font-weight: 600; color: var(--bordo); margin: 2px 0 0; }
+.error-items { color: var(--bordo); font-weight: 600; margin: 6px 0 0; }
