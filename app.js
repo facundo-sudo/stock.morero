@@ -106,7 +106,8 @@
   function aviso(msg, error) {
     var t = $('#toast');
     // Con una ventana abierta, el aviso va adentro de ella; si no, quedaría tapado por la ventana.
-    var abierto = document.querySelector('dialog[open]');
+    var act = document.activeElement;
+    var abierto = (act && act.closest && act.closest('dialog[open]')) || document.querySelector('dialog[open]');
     var destino = abierto || document.body;
     if (t.parentNode !== destino) destino.appendChild(t);
     t.textContent = msg;
@@ -353,12 +354,18 @@
   $('#grano-hibridos').addEventListener('change', renderHibridos);
   $('#btn-nuevo-hibrido').addEventListener('click', function () { abrirHibrido(); });
 
-  function abrirHibrido(h) {
+  var alCargarHibrido = null;   // si se abre desde la importación: qué hacer con el híbrido nuevo
+
+  function abrirHibrido(h, sugerido, alCargar) {
     var f = $('#form-hibrido');
     f.reset();
+    alCargarHibrido = alCargar || null;
+    if (sugerido) { f.grano.value = sugerido.grano || ''; f.semillero.value = sugerido.semillero || ''; f.hibrido.value = sugerido.hibrido || ''; }
     f.uid.value = h ? h.id : '';
     if (h) { f.grano.value = h.grano; f.semillero.value = h.semillero; f.hibrido.value = h.hibrido; }
     $('#tit-hibrido').textContent = h ? 'Editar híbrido' : 'Cargar híbrido';
+    $('#ayuda-hibrido').textContent = sugerido ? 'Datos tomados de la descripción «' + sugerido.desc + '». Revisalos antes de guardar.' : '';
+    $('#ayuda-hibrido').hidden = !sugerido;
     $('#dlg-hibrido').showModal();
   }
 
@@ -380,6 +387,12 @@
     }
     guardar();
     refrescar();
+    var cb = alCargarHibrido;
+    alCargarHibrido = null;
+    if (cb && !f.uid.value) cb(datos);
+  });
+  $('#dlg-hibrido').addEventListener('close', function () {
+    if (alCargarHibrido) { var cb = alCargarHibrido; alCargarHibrido = null; cb(null); }
   });
 
   $('#tabla-hibridos').addEventListener('click', function (e) {
@@ -1041,6 +1054,53 @@
     return mejor;
   }
 
+  function bandaDe(h, desc) {
+    if (!h) return '';
+    return h.grano === 'Girasol' ? bandaGirasol(desc) : 'Sin banda';
+  }
+
+  // Prefijos de marca que suelen venir en la descripción de Algoritmo.
+  var MARCAS = { syn: 'Syngenta', nk: 'Syngenta', adv: 'Advanta', ns: 'Nidera', dk: 'Dekalb', dm: 'Don Mario', ax: 'Nidera',
+    p: 'Pioneer', lg: 'Limagrain', ac: 'ACA', aca: 'ACA', kws: 'KWS', nusol: 'Nufarm', paraiso: 'Nidera', sps: 'Sursem', srm: 'Sursem' };
+  var NO_NOMBRE = ['girasol', 'maiz', 'sorgo', 'semilla', 'semillas', 'sem', 'env', 'bolsa', 'bolsas', 'g', 'x'];
+
+  // Arma un híbrido sugerido a partir de la descripción: «GIRASOL SYN3970 CL G2 Env. 180.000 Sem.» -> SYN 3970 CL.
+  function hibridoSugerido(desc) {
+    var d = fichas(desc), grano = granoEnTexto(desc);
+    var i = d.findIndex(function (t, k) { return /^\d{3,}$/.test(t) && !(t === '180' && d[k + 1] === '000') && t !== '000'; });
+    var nombre = [], marca = '';
+    if (i >= 0) {
+      if (i > 0 && /^[a-z]+$/.test(d[i - 1]) && NO_NOMBRE.indexOf(d[i - 1]) < 0) { nombre.push(d[i - 1]); marca = d[i - 1]; }
+      nombre.push(d[i]);
+      for (var k = i + 1; k < d.length && k < i + 3; k++) {
+        if (/^(cl|clhb|plus|hb|ho|hd|vip|vip3|pw|rr|rr2|mg|tg|ve)$/.test(d[k])) nombre.push(d[k]); else break;
+      }
+    }
+    var semillero = '';
+    var t = norm(desc);
+    semilleros().some(function (sm) { var n = norm(sm); if (n.length > 2 && t.indexOf(n) >= 0) { semillero = sm; return true; } return false; });
+    if (!semillero && marca && MARCAS[marca]) semillero = MARCAS[marca];
+    // Si ese semillero ya está cargado con otro nombre parecido, se usa como está escrito.
+    semilleros().some(function (sm) { if (norm(sm) === norm(semillero)) { semillero = sm; return true; } return false; });
+    return { grano: grano, semillero: semillero, hibrido: nombre.join(' ').toUpperCase(), desc: desc };
+  }
+
+  // Después de cargar un híbrido nuevo, se vuelven a buscar los híbridos de las filas que no tenían.
+  function redetectarFilas() {
+    var n = 0;
+    imp.filas.forEach(function (r) {
+      if (r.hibridoId || r.manual) return;
+      var h = detectarHibrido(r.desc);
+      if (!h) return;
+      r.hibridoId = h.id;
+      r.porNumero = !!h.porNumero;
+      if (!r.banda) r.banda = bandaDe(h, r.desc);
+      r.importar = !r.repetida;
+      n++;
+    });
+    return n;
+  }
+
   function granoEnTexto(txt) {
     var t = norm(txt);
     if (/\bgirasol/.test(t)) return 'Girasol';
@@ -1220,9 +1280,7 @@
       var cant = numeroAR(celda(f, 'cantidad'));
       var precio = numeroAR(celda(f, 'precio'));
       var h = detectarHibrido(desc);
-      var banda = '';
-      if (h && h.grano === 'Girasol') banda = bandaGirasol(desc);
-      else if (h) banda = 'Sin banda';
+      var banda = bandaDe(h, desc);
       imp.filas.push({
         cliente: cli, desc: desc, cantidad: cant,
         fecha: fechaISO(celda(f, 'fecha')) || hoy(),
@@ -1399,7 +1457,7 @@
     }
     calcularVinculos();
     var solo = $('#imp-solo-problemas').checked;
-    var opcH = '<option value="">— no es un híbrido cargado —</option>' + ordenarHibridos(db.hibridos).map(function (h) {
+    var opcH = '<option value="">— no es un híbrido cargado —</option><option value="__nuevo">＋ Cargar híbrido nuevo…</option>' + ordenarHibridos(db.hibridos).map(function (h) {
       return '<option value="' + h.id + '">' + esc(h.hibrido + ' · ' + h.semillero + ' (' + h.grano + ')') + '</option>';
     }).join('');
     var opcB = '<option value="">Elegir…</option>' + BANDAS.map(function (b) { return '<option>' + b + '</option>'; }).join('');
@@ -1442,7 +1500,7 @@
         '<td class="desc">' + esc(r.desc) + (r.comprobante ? '<br><small>' + esc(r.comprobante) + '</small>' : '') + '</td>' +
         '<td>' + (r.hibridoId || r.elegir || pareceSemilla(r.desc)
           ? '<select data-i="' + i + '" data-k="hibridoId">' + opcH.replace('value="' + r.hibridoId + '"', 'value="' + r.hibridoId + '" selected') + '</select>' +
-            (r.porNumero && r.hibridoId ? '<br><small title="El nombre no coincide exacto; se asoció por el número del híbrido">por el número · revisá</small>' : '')
+            (r.porNumero && r.hibridoId ? '<br><small class="por-numero" title="El nombre no coincide exacto; se asoció por el número del híbrido">¿Es el mismo híbrido? Se asoció por el número; si no lo es, cambialo o elegí «Cargar híbrido nuevo».</small>' : '')
           : '<button type="button" class="mini" data-elegir="' + i + '">Elegir híbrido</button>') + '</td>' +
         '<td><select data-i="' + i + '" data-k="banda">' + opcB.replace('<option>' + r.banda + '</option>', '<option selected>' + r.banda + '</option>') + '</select></td>' +
         '<td class="num">' + (isNaN(r.cantidad) ? '?' : num(r.cantidad)) +
@@ -1508,8 +1566,26 @@
     var el = e.target, r = imp.filas[Number(el.dataset.i)];
     if (!r) return;
     if (el.dataset.k === 'importar') r.importar = el.checked;
+    if (el.dataset.k === 'hibridoId' && el.value === '__nuevo') {
+      var antes = r.hibridoId;
+      abrirHibrido(null, hibridoSugerido(r.desc), function (nuevo) {
+        if (!nuevo) { renderImportacion(); return; }
+        r.hibridoId = nuevo.id;
+        r.porNumero = false;
+        r.manual = true;
+        r.banda = r.banda || bandaDe(nuevo, r.desc);
+        r.importar = !r.repetida;
+        var otras = redetectarFilas();
+        calcularVinculos();
+        renderImportacion();
+        if (otras) aviso('Híbrido cargado. También se asoció a ' + otras + (otras === 1 ? ' fila más.' : ' filas más.'));
+      });
+      el.value = antes;
+      return;
+    }
     if (el.dataset.k === 'hibridoId') {
       r.hibridoId = el.value;
+      r.manual = true;
       r.porNumero = false;
       var h = hibrido(el.value);
       if (h && !r.banda) r.banda = h.grano === 'Girasol' ? bandaGirasol(r.desc) : 'Sin banda';

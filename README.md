@@ -17,7 +17,7 @@ Página web para llevar el stock de semillas (girasol, maíz y sorgo): híbridos
    - **Importar ventas de Algoritmo (Excel)**: se eligen las columnas de Cliente, Descripción, Cantidad y Código de operación
      (y opcionalmente Fecha y Comprobante); la elección queda recordada.
      - Código de operación: **FAC** y **REM** → venta; **PED** → pedido; **RDE** → devolución (suma stock).
-     - Híbrido: se busca en la descripción el híbrido cargado (ej.: «girasol ADV 5407 CL G2 Env. 180.000 Semillas» → ADV 5407). Si el nombre no está completo, se asocia por el número del híbrido (ej.: «3970» o «NK3970» → SYN 3970); esas filas quedan marcadas «por el número · revisá» para controlarlas.
+     - Híbrido: se busca en la descripción el híbrido cargado (ej.: «girasol ADV 5407 CL G2 Env. 180.000 Semillas» → ADV 5407). Si el nombre no está completo, se asocia por el número del híbrido (ej.: «3970» o «NK3970» → SYN 3970); esas filas quedan marcadas «¿Es el mismo híbrido?» para controlarlas. Si el híbrido no está cargado, en el desplegable de la fila está «＋ Cargar híbrido nuevo…»: abre la carga con grano, semillero y nombre tomados de la descripción (ej.: SYN 3970 CL, Syngenta, Girasol); al guardarlo se asocia a esa fila y a las demás que lo nombran (también «NK 3970»).
      - Bandas en girasol: G0, G1, G2 → Banda 1; G3 → Banda 2; G3E, G4 → Banda 3.
      - Si llega un remito o una factura de un cliente e híbrido que ya tienen un pedido, remito o factura anterior con saldo,
        la vista previa pregunta si corresponde a esa operación. Pedido, remitos y factura quedan vinculados como una sola
