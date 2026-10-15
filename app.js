@@ -1020,6 +1020,24 @@
         }
       }
     });
+    return mejor || hibridoPorNumero(d, grano);
+  }
+
+  // Si el nombre no aparece completo, se busca por el número del híbrido: "3970" o "NK 3970" -> "SYN 3970".
+  // Tienen que estar todos los números de 3 o más cifras del híbrido; si empatan, gana el que comparte
+  // más palabras con la descripción y el del mismo grano.
+  function hibridoPorNumero(d, grano) {
+    var mejor = null, puntos = 0;
+    db.hibridos.forEach(function (h) {
+      var n = fichas(h.hibrido);
+      var nums = n.filter(function (t) { return /^\d{3,}$/.test(t); });
+      if (!nums.length || !nums.every(function (t) { return d.indexOf(t) >= 0; })) return;
+      var comunes = n.filter(function (t) { return !/^\d+$/.test(t) && d.indexOf(t) >= 0; }).length;
+      var sobran = n.length - nums.length - comunes;
+      var p = 100 + nums.join('').length * 10 + comunes * 5 - sobran + (grano && h.grano === grano ? 1000 : 0);
+      if (p > puntos) { puntos = p; mejor = h; }
+    });
+    if (mejor) mejor = Object.assign({ porNumero: true }, mejor);
     return mejor;
   }
 
@@ -1209,7 +1227,7 @@
         cliente: cli, desc: desc, cantidad: cant,
         fecha: fechaISO(celda(f, 'fecha')) || hoy(),
         comprobante: comp, doc: doc || porDefecto, docAuto: !!doc, precio: precio > 0 ? precio : null,
-        hibridoId: h ? h.id : '', banda: banda, vinculo: ''
+        hibridoId: h ? h.id : '', porNumero: !!(h && h.porNumero), banda: banda, vinculo: ''
       });
     });
     // Si el mismo renglón aparece repetido en un comprobante, se numera (1.º, 2.º…) para distinguirlos.
@@ -1423,7 +1441,8 @@
           (r.docAuto ? '' : '<br><small>no se reconoció</small>') + '</td>' +
         '<td class="desc">' + esc(r.desc) + (r.comprobante ? '<br><small>' + esc(r.comprobante) + '</small>' : '') + '</td>' +
         '<td>' + (r.hibridoId || r.elegir || pareceSemilla(r.desc)
-          ? '<select data-i="' + i + '" data-k="hibridoId">' + opcH.replace('value="' + r.hibridoId + '"', 'value="' + r.hibridoId + '" selected') + '</select>'
+          ? '<select data-i="' + i + '" data-k="hibridoId">' + opcH.replace('value="' + r.hibridoId + '"', 'value="' + r.hibridoId + '" selected') + '</select>' +
+            (r.porNumero && r.hibridoId ? '<br><small title="El nombre no coincide exacto; se asoció por el número del híbrido">por el número · revisá</small>' : '')
           : '<button type="button" class="mini" data-elegir="' + i + '">Elegir híbrido</button>') + '</td>' +
         '<td><select data-i="' + i + '" data-k="banda">' + opcB.replace('<option>' + r.banda + '</option>', '<option selected>' + r.banda + '</option>') + '</select></td>' +
         '<td class="num">' + (isNaN(r.cantidad) ? '?' : num(r.cantidad)) +
@@ -1491,6 +1510,7 @@
     if (el.dataset.k === 'importar') r.importar = el.checked;
     if (el.dataset.k === 'hibridoId') {
       r.hibridoId = el.value;
+      r.porNumero = false;
       var h = hibrido(el.value);
       if (h && !r.banda) r.banda = h.grano === 'Girasol' ? bandaGirasol(r.desc) : 'Sin banda';
       r.importar = !!el.value;
