@@ -15,7 +15,7 @@
   var K_SESION = PREFIJO + 'sesion', K_META = PREFIJO + 'meta';
   var LS = window.localStorage;
   var proto = Storage.prototype, oSet = proto.setItem, oRem = proto.removeItem, oClear = proto.clear;
-  var aplicando = false, listo = false, timer = null, subiendo = false;
+  var aplicando = false, listo = false, timer = null, subiendo = false, recargando = false;
 
   function leerJSON(k, d) { try { var v = LS.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
   function escribirJSON(k, v) { try { oSet.call(LS, k, JSON.stringify(v)); } catch (e) { /* nada */ } }
@@ -189,7 +189,7 @@
     }).catch(function () { /* sin conexión */ });
   });
   window.addEventListener('beforeunload', function (e) {
-    if (meta().pendiente && sesion()) { subir(); e.preventDefault(); e.returnValue = ''; }
+    if (!recargando && meta().pendiente && sesion()) { subir(); e.preventDefault(); e.returnValue = ''; }
   });
 
   // ---------- Pantalla ----------
@@ -201,7 +201,8 @@
   function esc(t) { return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
   var css = '' +
-    '.nube-boton{position:fixed;left:12px;bottom:12px;z-index:900;display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;border:1px solid #ccc;background:#fff;color:#5B5B5F;font:600 13px system-ui,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.15);cursor:pointer}' +
+    '.nube-barra{position:fixed;left:12px;bottom:12px;z-index:900;display:flex;gap:8px;flex-wrap:wrap}' +
+    '.nube-boton{display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;border:1px solid #ccc;background:#fff;color:#5B5B5F;font:600 13px system-ui,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.15);cursor:pointer}' +
     '.nube-boton .p{width:9px;height:9px;border-radius:50%;background:#999}' +
     '.nube-boton.ok .p{background:#2e7d32}.nube-boton.pend .p{background:#e6a100}.nube-boton.mal .p{background:#8F131C}' +
     '.nube-dlg{border:none;border-radius:12px;padding:0;width:min(420px,calc(100vw - 32px));box-shadow:0 10px 40px rgba(0,0,0,.3);font:15px system-ui,sans-serif;color:#222}' +
@@ -217,7 +218,7 @@
     '.nube-dlg .err{color:#8F131C;font-weight:600}' +
     '.nube-aviso{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:1000;background:#5B5B5F;color:#fff;padding:10px 16px;border-radius:8px;font:14px system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:calc(100vw - 32px)}' +
     '.nube-aviso.ok{background:#2e7d32;font-weight:600}' +
-    '@media print{.nube-boton,.nube-aviso{display:none!important}}';
+    '@media print{.nube-barra,.nube-aviso{display:none!important}}';
 
   var boton, dlg;
   function aviso(t, tipo) {
@@ -268,6 +269,8 @@
         '<p>' + (m.pendiente ? 'Hay cambios esperando para subir.' : m.ultima ? 'Todo guardado. Último guardado: <b>' + esc(fechaTxt(m.ultima)) + '</b>.' : 'Todavía no se subió nada.') + '</p>' +
         (ultimoError ? '<p class="err">' + esc(ultimoError) + '</p>' : '') +
         '<p>Los cambios se suben solos. Al abrir la página en otro equipo, trae lo último.</p>' +
+        '<p>Copia en tu PC: con «⬇ Bajar copia» (abajo a la izquierda) se descarga un archivo con todos los datos; con «Restaurar copia» se vuelve a cargar.</p>' +
+        '<div class="b"><button type="button" data-n="restaurar">Restaurar copia</button></div>' +
         '<div class="b"><button type="button" data-n="salir">Cerrar sesión</button><button type="button" data-n="bajar">Traer de la nube</button>' +
         '<button type="button" class="pri" data-n="subir">Guardar ahora</button></div>' +
         '<div class="b"><button type="button" data-n="cerrar">Cerrar</button></div></form>';
@@ -275,12 +278,60 @@
     dlg.showModal();
   }
 
+  // ---------- Copia de seguridad en un archivo de la PC ----------
+  var NOMBRES = { stock: 'Stock', cotizador: 'Cotizador', proveedores: 'Proveedores' };
+  function bajarCopia() {
+    var d = new Date(), f = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    var datos = { tipo: 'copia-morero', app: APP, fecha: d.toISOString(), contenido: foto() };
+    var blob = new Blob([JSON.stringify(datos)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'Copia ' + (NOMBRES[APP] || APP) + ' MORERO ' + f + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+    aviso('✓ Copia descargada en tu PC (carpeta Descargas).', 'ok');
+  }
+
+  function restaurarCopia() {
+    var inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.json,application/json';
+    inp.addEventListener('change', function () {
+      var arch = inp.files && inp.files[0];
+      if (!arch) return;
+      var lector = new FileReader();
+      lector.onload = function () {
+        var d = null;
+        try { d = JSON.parse(lector.result); } catch (e) { d = null; }
+        if (!d || d.tipo !== 'copia-morero' || !d.contenido) { alert('Ese archivo no es una copia bajada con el botón «Bajar copia».'); return; }
+        if (d.app !== APP) { alert('Esa copia es de ' + (NOMBRES[d.app] || d.app) + ', no de ' + (NOMBRES[APP] || APP) + '. Abrila en esa página.'); return; }
+        if (!confirm('¿Reemplazar todos los datos por los de la copia del ' + fechaTxt(d.fecha) + '?\n\nLo que hay ahora se reemplaza (en este equipo y en la nube).')) return;
+        aplicar(d.contenido);
+        var m = meta(); m.pendiente = true; guardarMeta(m);
+        sessionStorage.setItem(PREFIJO + 'recarga', '1');
+        recargando = true;
+        location.reload();
+      };
+      lector.readAsText(arch);
+    });
+    inp.click();
+  }
+
   function montar() {
     var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+    var barra = document.createElement('div');
+    barra.className = 'nube-barra';
     boton = document.createElement('button');
     boton.type = 'button';
     boton.addEventListener('click', abrirPanel);
-    document.body.appendChild(boton);
+    var bCopia = document.createElement('button');
+    bCopia.type = 'button';
+    bCopia.className = 'nube-boton';
+    bCopia.textContent = '⬇ Bajar copia';
+    bCopia.title = 'Bajar una copia de todos los datos a esta PC';
+    bCopia.addEventListener('click', bajarCopia);
+    barra.appendChild(boton);
+    barra.appendChild(bCopia);
+    document.body.appendChild(barra);
     dlg = document.createElement('dialog');
     dlg.className = 'nube-dlg';
     dlg.addEventListener('click', function (e) {
@@ -288,6 +339,7 @@
       if (!b) return;
       var n = b.dataset.n;
       if (n === 'cerrar') dlg.close();
+      if (n === 'restaurar') { dlg.close(); restaurarCopia(); }
       if (n === 'subir') { dlg.close(); subir(true).then(function () { if (ultimoError) aviso(ultimoError); }); }
       if (n === 'bajar') { dlg.close(); bajar(false).catch(function (e2) { aviso('No se pudo leer la nube: ' + e2.message); }); }
       if (n === 'salir') {
