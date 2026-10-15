@@ -302,9 +302,16 @@
 
   // Nombre del cliente con el que se toma un nombre del Excel:
   // el mismo nombre, uno de sus «otros nombres», o MORERO SEMILLAS Y CEREALES S.A. para «MORERO SA (FIDEICOMISO)».
-  function clienteCanonico(nombre) {
+  function clienteCanonico(nombre, cuit) {
     var n = norm(nombre);
     if (!n) return nombre;
+    // Con CUIT: el cliente cargado con el mismo CUIT es el mismo cliente (si hay varios, el que no es fideicomiso).
+    var dig = soloDigitos(cuit);
+    if (dig.length >= 8) {
+      var mismos = db.clientes.filter(function (x) { return soloDigitos(x.cuit) === dig; });
+      var porCuit = mismos.find(esMoreroPrincipal) || mismos.find(function (x) { return !esMoreroFideicomiso(x.nombre); }) || mismos[0];
+      if (porCuit && !esMoreroFideicomiso(porCuit.nombre)) return porCuit.nombre;
+    }
     var c = db.clientes.find(function (x) { return norm(x.nombre) === n; }) ||
       db.clientes.find(function (x) { return aliasDe(x).some(function (a) { return norm(a) === n; }); });
     if (esMoreroFideicomiso(nombre) || (c && esMoreroFideicomiso(c.nombre))) {
@@ -1247,8 +1254,10 @@
       var porTitulo = function (k) { return guardado[k] ? titulos.indexOf(guardado[k]) : -1; };
       var col = {
         cliente: porTitulo('cliente'), descripcion: porTitulo('descripcion'), cantidad: porTitulo('cantidad'),
-        fecha: porTitulo('fecha'), comprobante: porTitulo('comprobante'), operacion: porTitulo('operacion'), precio: porTitulo('precio')
+        fecha: porTitulo('fecha'), comprobante: porTitulo('comprobante'), operacion: porTitulo('operacion'), precio: porTitulo('precio'),
+        cuit: porTitulo('cuit')
       };
+      if (col.cuit < 0) col.cuit = adivinarColumna(titulos, ['cuit', 'c.u.i.t', 'cuit/cuil', 'cuil', 'nro de cuit', 'numero de cuit'], ['vendedor', 'transporte']);
       if (col.cliente < 0) col.cliente = adivinarColumna(titulos, compras
         ? ['nombre del proveedor', 'proveedor', 'nombre del productor', 'razon social', 'nombre', 'denominacion', 'semillero']
         : ['nombre del productor', 'productor', 'razon social', 'cliente', 'nombre', 'denominacion'],
@@ -1285,7 +1294,7 @@
     }, true);
   }
 
-  var CAMPOS_IMP = ['cliente', 'descripcion', 'cantidad', 'operacion', 'fecha', 'comprobante', 'precio'];
+  var CAMPOS_IMP = ['cliente', 'descripcion', 'cantidad', 'operacion', 'fecha', 'comprobante', 'precio', 'cuit'];
 
   function columnaElegida(k) { return Number($('#form-imp [data-col="' + k + '"]').value); }
 
@@ -1319,6 +1328,7 @@
     if (c.cliente < 0 || c.descripcion < 0 || c.cantidad < 0) { renderImportacion(); return; }
     imp.datos.forEach(function (f) {
       var cli = String(celda(f, 'cliente')).trim();
+      var cuit = String(celda(f, 'cuit')).trim();
       var desc = String(celda(f, 'descripcion')).trim();
       if (!cli && !desc) return;
       var comp = String(celda(f, 'comprobante')).trim();
@@ -1328,7 +1338,7 @@
       var h = detectarHibrido(desc);
       var banda = bandaDe(h, desc);
       imp.filas.push({
-        cliente: clienteCanonico(cli), clienteOrig: cli, desc: desc, cantidad: cant,
+        cliente: clienteCanonico(cli, cuit), clienteOrig: cli, cuit: cuit, desc: desc, cantidad: cant,
         fecha: fechaISO(celda(f, 'fecha')) || hoy(),
         comprobante: comp, doc: doc || porDefecto, docAuto: !!doc, precio: precio > 0 ? precio : null,
         hibridoId: h ? h.id : '', porNumero: !!(h && h.porNumero), banda: banda, vinculo: ''
@@ -1696,10 +1706,10 @@
       if (!r.importar || problemaFila(r) || r.cambio) return;
       var c = compras ? null : db.clientes.find(function (x) { return norm(x.nombre) === norm(r.cliente); });
       if (!c && !compras) {
-        c = { id: nuevoId(), nombre: r.cliente, cuit: '', localidad: '', telefono: '', correo: '' };
+        c = { id: nuevoId(), nombre: r.cliente, cuit: r.cuit || '', localidad: '', telefono: '', correo: '' };
         db.clientes.push(c);
         nuevos++;
-      }
+      } else if (c && !c.cuit && r.cuit && !esMoreroFideicomiso(r.clienteOrig || '')) c.cuit = r.cuit;
       var grupo = '';
       if (r.vinculo && r.vinculo !== 'nuevo') {
         var claves = (r.vinculo.indexOf('todas:') === 0 ? r.vinculo.slice(6).split(',') : [r.vinculo]).map(resolver).filter(Boolean);
