@@ -130,6 +130,7 @@
         var f = filas && filas[0];
         guardarMeta({ ultima: f ? f.actualizado : '', pendiente: false, subido: Date.now() });
         ultimoError = '';
+        aviso('✓ Guardado en la nube · ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }), 'ok');
       });
     }).catch(function (e) {
       ultimoError = e.message === 'sin sesión' ? '' : 'No se pudo guardar en la nube (' + e.message + '). Se reintenta solo.';
@@ -215,14 +216,19 @@
     '.nube-dlg button.pri{background:#8F131C;color:#fff}' +
     '.nube-dlg .err{color:#8F131C;font-weight:600}' +
     '.nube-aviso{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:1000;background:#5B5B5F;color:#fff;padding:10px 16px;border-radius:8px;font:14px system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:calc(100vw - 32px)}' +
+    '.nube-aviso.ok{background:#2e7d32;font-weight:600}' +
     '@media print{.nube-boton,.nube-aviso{display:none!important}}';
 
   var boton, dlg;
-  function aviso(t) {
+  function aviso(t, tipo) {
+    var viejo = document.querySelector('.nube-aviso');
+    if (viejo) viejo.remove();
     var a = document.createElement('div');
-    a.className = 'nube-aviso'; a.textContent = t;
+    a.className = 'nube-aviso' + (tipo === 'ok' ? ' ok' : '');
+    a.setAttribute('role', 'status');
+    a.textContent = t;
     (document.querySelector('dialog[open]') || document.body).appendChild(a);
-    setTimeout(function () { a.remove(); }, 4000);
+    setTimeout(function () { a.remove(); }, tipo === 'ok' ? 2500 : 4000);
   }
 
   function estado() {
@@ -282,7 +288,7 @@
       if (!b) return;
       var n = b.dataset.n;
       if (n === 'cerrar') dlg.close();
-      if (n === 'subir') { dlg.close(); subir(true).then(function () { aviso(ultimoError || 'Guardado en la nube.'); }); }
+      if (n === 'subir') { dlg.close(); subir(true).then(function () { if (ultimoError) aviso(ultimoError); }); }
       if (n === 'bajar') { dlg.close(); bajar(false).catch(function (e2) { aviso('No se pudo leer la nube: ' + e2.message); }); }
       if (n === 'salir') {
         if (meta().pendiente && !confirm('Hay cambios sin subir. ¿Cerrar sesión igual?')) return;
