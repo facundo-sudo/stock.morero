@@ -695,6 +695,13 @@
       .map(function (h) { return '<option value="' + h.id + '">' + esc(h.hibrido + ' · ' + h.semillero + ' (' + h.grano + ')') + '</option>'; }).join('');
     selH.value = hs[hid] ? hid : '';
     hid = selH.value;
+    var selB = $('#banda-' + s), banda = selB.value;
+    var bs = {};
+    todos.forEach(function (m) { if (m.banda) bs[m.banda] = true; });
+    selB.innerHTML = '<option value="">Todas las bandas</option>' + BANDAS.filter(function (b) { return bs[b]; })
+      .map(function (b) { return '<option>' + b + '</option>'; }).join('');
+    selB.value = bs[banda] ? banda : '';
+    banda = selB.value;
     if (!todos.length) {
       $('#resumen-' + s).textContent = '';
       t.innerHTML = '<tr><td class="vacio">' + (ing ? 'Todavía no hay compras cargadas.' : 'Todavía no hay ventas ni reservas cargadas.') + '</td></tr>';
@@ -704,7 +711,7 @@
       var h = hibrido(m.hibridoId), c = cliente(m.clienteId);
       var texto = nombreHibrido(h) + ' ' + (c ? c.nombre : '') + ' ' + (m.proveedor || '') + ' ' + (m.obs || '') + ' ' + (m.comprobante || '');
       return (!tipo || m.tipo === tipo) && (!q || norm(texto).indexOf(q) >= 0) && (!soloRemitir || aRemitir(m) > 0) &&
-        (!quien || norm(quienDe(m)) === quien) && (!hid || m.hibridoId === hid);
+        (!quien || norm(quienDe(m)) === quien) && (!hid || m.hibridoId === hid) && (!banda || m.banda === banda);
     });
     var filtrado = lista.length !== todos.length;
     var bolsas = lista.reduce(function (t, m) { return t + (Number(m.cantidad) || 0); }, 0);
@@ -739,6 +746,7 @@
     $('#tipo-' + s).addEventListener('change', function () { renderMovs(clase); });
     $('#quien-' + s).addEventListener('change', function () { renderMovs(clase); });
     $('#hibrido-' + s).addEventListener('change', function () { renderMovs(clase); });
+    $('#banda-' + s).addEventListener('change', function () { renderMovs(clase); });
     $(s === 'ventas' ? '#solo-remitir' : '#solo-recibir').addEventListener('change', function () { renderMovs(clase); });
     $('#tabla-' + s).addEventListener('click', function (e) {
       var b = e.target.closest('button');

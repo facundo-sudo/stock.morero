@@ -43,7 +43,7 @@ Página web para llevar el stock de semillas (girasol, maíz y sorgo): híbridos
    - **Solo totales**: por híbrido y banda, total ingresado, total salido, saldo y saldos a recibir / a remitir, con total por grano y general.
    Los comprobantes vinculados (pedido, remito, factura) se muestran uno debajo del otro aunque tengan fechas distintas
    (también en las listas de Compras y Ventas).
-   - En las listas de Ventas y Compras se puede filtrar por **cliente** (o **proveedor**), por **híbrido** y por tipo; abajo de los filtros dice cuántas operaciones y bolsas se están mostrando.
+   - En las listas de Ventas y Compras se puede filtrar por **cliente** (o **proveedor**), por **híbrido**, por **banda** y por tipo; abajo de los filtros dice cuántas operaciones y bolsas se están mostrando.
 7. Los reportes se pueden **imprimir / guardar en PDF** o **descargar en Excel**.
 
 ## Dónde quedan los datos
