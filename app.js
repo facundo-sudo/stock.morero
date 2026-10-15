@@ -293,8 +293,54 @@
     b.addEventListener('click', function () { b.closest('dialog').close(); });
   });
 
+  // ---------- Clientes que son el mismo (otros nombres / mismo CUIT) ----------
+  var MORERO = 'MORERO SEMILLAS Y CEREALES S.A.';
+  function esMoreroFideicomiso(nombre) { var n = norm(nombre); return /morero/.test(n) && /fideicomiso/.test(n); }
+  function esMoreroPrincipal(c) { return /morero semillas/.test(norm(c.nombre)); }
+  function soloDigitos(t) { return String(t || '').replace(/\D/g, ''); }
+  function aliasDe(c) { return String(c.alias || '').split(';').map(function (a) { return a.trim(); }).filter(Boolean); }
+
+  // Nombre del cliente con el que se toma un nombre del Excel:
+  // el mismo nombre, uno de sus «otros nombres», o MORERO SEMILLAS Y CEREALES S.A. para «MORERO SA (FIDEICOMISO)».
+  function clienteCanonico(nombre) {
+    var n = norm(nombre);
+    if (!n) return nombre;
+    var c = db.clientes.find(function (x) { return norm(x.nombre) === n; }) ||
+      db.clientes.find(function (x) { return aliasDe(x).some(function (a) { return norm(a) === n; }); });
+    if (esMoreroFideicomiso(nombre) || (c && esMoreroFideicomiso(c.nombre))) {
+      var principal = db.clientes.find(esMoreroPrincipal);
+      return principal ? principal.nombre : MORERO;
+    }
+    return c ? c.nombre : nombre;
+  }
+
+  // Une en MORERO SEMILLAS Y CEREALES S.A. los clientes «MORERO SA (FIDEICOMISO)» (mismo CUIT):
+  // sus ventas, pedidos y remitos pasan al principal, y el nombre queda como «otro nombre».
+  function unificarClientes() {
+    var dupl = db.clientes.filter(function (c) { return esMoreroFideicomiso(c.nombre); });
+    if (!dupl.length) return;
+    var principal = db.clientes.find(esMoreroPrincipal);
+    if (!principal) {
+      principal = dupl.shift();
+      var viejo = principal.nombre;
+      principal.nombre = MORERO;
+      principal.alias = aliasDe(principal).concat([viejo]).join('; ');
+    }
+    dupl.forEach(function (d) {
+      db.movimientos.forEach(function (m) { if (m.clienteId === d.id) m.clienteId = principal.id; });
+      var al = aliasDe(principal);
+      if (!al.some(function (a) { return norm(a) === norm(d.nombre); })) al.push(d.nombre);
+      principal.alias = al.join('; ');
+      if (!principal.cuit && d.cuit) principal.cuit = d.cuit;
+    });
+    var ids = dupl.map(function (d) { return d.id; });
+    db.clientes = db.clientes.filter(function (c) { return ids.indexOf(c.id) < 0; });
+    guardar();
+  }
+
   // ---------- Render general ----------
   function refrescar() {
+    unificarClientes();
     renderInicio();
     renderHibridos();
     renderClientes();
@@ -415,7 +461,7 @@
   function renderClientes() {
     var q = norm($('#busca-clientes').value);
     var lista = db.clientes.slice().sort(function (a, b) { return a.nombre.localeCompare(b.nombre, 'es'); })
-      .filter(function (c) { return !q || norm(c.nombre + ' ' + c.cuit + ' ' + c.localidad).indexOf(q) >= 0; });
+      .filter(function (c) { return !q || norm(c.nombre + ' ' + c.cuit + ' ' + c.localidad + ' ' + (c.alias || '')).indexOf(q) >= 0; });
     var t = $('#tabla-clientes');
     if (!db.clientes.length) {
       t.innerHTML = '<tr><td class="vacio">Todavía no hay clientes. Cargalos con el botón o importá un Excel.</td></tr>';
@@ -423,7 +469,7 @@
     }
     t.innerHTML = '<thead><tr><th>Nombre</th><th>CUIT</th><th>Localidad</th><th>Teléfono</th><th>Correo</th><th class="acc"></th></tr></thead><tbody>' +
       (lista.length ? lista.map(function (c) {
-        return '<tr><td><b>' + esc(c.nombre) + '</b></td><td>' + esc(c.cuit) + '</td><td>' + esc(c.localidad) + '</td>' +
+        return '<tr><td><b>' + esc(c.nombre) + '</b>' + (c.alias ? '<br><small>También: ' + esc(c.alias) + '</small>' : '') + '</td><td>' + esc(c.cuit) + '</td><td>' + esc(c.localidad) + '</td>' +
           '<td>' + esc(c.telefono) + '</td><td>' + esc(c.correo) + '</td>' +
           '<td class="acc"><button class="mini" data-edit-c="' + c.id + '">Editar</button> ' +
           '<button class="mini borrar" data-del-c="' + c.id + '">Borrar</button></td></tr>';
@@ -437,7 +483,7 @@
     var f = $('#form-cliente');
     f.reset();
     f.uid.value = c ? c.id : '';
-    if (c) ['nombre', 'cuit', 'localidad', 'telefono', 'correo'].forEach(function (k) { f[k].value = c[k] || ''; });
+    if (c) ['nombre', 'cuit', 'localidad', 'telefono', 'correo', 'alias'].forEach(function (k) { f[k].value = c[k] || ''; });
     $('#tit-cliente').textContent = c ? 'Editar cliente' : 'Cargar cliente';
     $('#dlg-cliente').showModal();
   }
@@ -445,7 +491,7 @@
   $('#form-cliente').addEventListener('submit', function (e) {
     var f = e.target;
     var datos = {};
-    ['nombre', 'cuit', 'localidad', 'telefono', 'correo'].forEach(function (k) { datos[k] = f[k].value.trim(); });
+    ['nombre', 'cuit', 'localidad', 'telefono', 'correo', 'alias'].forEach(function (k) { datos[k] = f[k].value.trim(); });
     var repetido = db.clientes.find(function (c) { return c.id !== f.uid.value && norm(c.nombre) === norm(datos.nombre); });
     if (repetido) { e.preventDefault(); aviso('Ya hay un cliente con ese nombre.', true); return; }
     if (f.uid.value) {
@@ -889,7 +935,7 @@
     var q = norm(this.value);
     var cont = $('#resultados-cliente');
     if (!q) { cont.innerHTML = ''; return; }
-    var lista = db.clientes.filter(function (c) { return norm(c.nombre + ' ' + c.cuit).indexOf(q) >= 0; })
+    var lista = db.clientes.filter(function (c) { return norm(c.nombre + ' ' + c.cuit + ' ' + (c.alias || '')).indexOf(q) >= 0; })
       .sort(function (a, b) { return a.nombre.localeCompare(b.nombre, 'es'); }).slice(0, 12);
     cont.innerHTML = lista.length ? lista.map(function (c) {
       return '<button type="button" data-cli="' + c.id + '">' + esc(c.nombre) +
@@ -1282,7 +1328,7 @@
       var h = detectarHibrido(desc);
       var banda = bandaDe(h, desc);
       imp.filas.push({
-        cliente: cli, desc: desc, cantidad: cant,
+        cliente: clienteCanonico(cli), clienteOrig: cli, desc: desc, cantidad: cant,
         fecha: fechaISO(celda(f, 'fecha')) || hoy(),
         comprobante: comp, doc: doc || porDefecto, docAuto: !!doc, precio: precio > 0 ? precio : null,
         hibridoId: h ? h.id : '', porNumero: !!(h && h.porNumero), banda: banda, vinculo: ''
@@ -1330,7 +1376,7 @@
 
   // Identifica un renglón de Algoritmo sin mirar la cantidad: operación + comprobante + cliente + descripción.
   function identBase(r) {
-    return [r.doc, norm(r.comprobante), norm(r.cliente), norm(r.desc), r.comprobante ? '' : r.fecha].join('|');
+    return [r.doc, norm(r.comprobante), norm(r.clienteOrig || r.cliente), norm(r.desc), r.comprobante ? '' : r.fecha].join('|');
   }
   function identDe(r) { return identBase(r) + '|' + r.ordinal; }
 
@@ -1493,7 +1539,7 @@
       }
       html += '<tr class="' + (!r.importar ? 'omitida' : prob ? 'revisar' : '') + '">' +
         '<td><input type="checkbox" data-i="' + i + '" data-k="importar"' + (r.importar ? ' checked' : '') + '></td>' +
-        '<td>' + esc(r.cliente) + (clienteNuevo && r.importar ? ' <span class="etq warn">cliente nuevo</span>' : '') +
+        '<td>' + esc(r.cliente) + (r.clienteOrig && norm(r.clienteOrig) !== norm(r.cliente) ? '<br><small>figura como ' + esc(r.clienteOrig) + '</small>' : '') + (clienteNuevo && r.importar ? ' <span class="etq warn">cliente nuevo</span>' : '') +
           (esSemillero ? ' <span class="etq warn">¿es una compra?</span>' : '') + '</td>' +
         '<td><select data-i="' + i + '" data-k="doc" class="sel-doc">' + opcD.replace('value="' + r.doc + '"', 'value="' + r.doc + '" selected') + '</select>' +
           (r.docAuto ? '' : '<br><small>no se reconoció</small>') + '</td>' +
