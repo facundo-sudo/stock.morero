@@ -702,7 +702,9 @@
     fMov.proveedor.value = m ? (m.proveedor || (hm ? hm.semillero : '')) : '';
     provAuto = !m || !m.proveedor;
     itemsMov = [];
-    $('#bloque-items').hidden = !(ing && !m);
+    $('#bloque-items').hidden = !!m;
+    $('#ayuda-items').textContent = 'Para cargar varios híbridos ' + (ing ? 'del mismo proveedor' : 'del mismo cliente') +
+      ': elegí híbrido, banda y cantidad, tocá «Agregar este híbrido» y seguí con el próximo. Al terminar, tocá «Guardar todo».';
     renderItems();
     mostrarProveedor();
     sugerirProveedor();
@@ -782,9 +784,19 @@
     return '';
   }
 
+  // Bolsas de ese híbrido y banda que ya están agregadas en la lista (para ventas, descuentan del disponible).
+  function enPedido(hid, banda) {
+    return itemsMov.reduce(function (t, l) { return t + (l.hibridoId === hid && (!banda || l.banda === banda) ? l.cantidad : 0); }, 0);
+  }
+
   function agregarItem() {
     var l = lineaActual(), err = lineaValida(l);
     if (err) { aviso(err, true); return; }
+    if (fMov.clase.value !== 'ingreso' && !fMov.clienteId.value) { aviso('Elegí un cliente.', true); return; }
+    if (claseDe(fMov.tipo.value) === 'salida') {
+      var disp = stock(l.hibridoId, l.banda, '') - enPedido(l.hibridoId, l.banda);
+      if (l.cantidad > disp && !confirm('Hay ' + num(disp) + ' bolsas disponibles en ' + l.banda + ' y querés descontar ' + num(l.cantidad) + '.\n¿Agregar igual?')) return;
+    }
     if (pideProveedor() && !fMov.proveedor.value.trim()) sugerirProveedor();
     provAuto = false;   // con un híbrido agregado, el proveedor queda fijo para todo el pedido
     itemsMov.push(l);
@@ -808,10 +820,10 @@
       return '<div class="item-mov"><span><b>' + esc(h.hibrido || '') + '</b> · ' + esc(h.grano || '') + ' · ' + esc(h.semillero || '') + ' · ' + esc(l.banda) +
         ' · ' + num(l.cantidad) + ' bolsas' + (l.precio != null ? ' · ' + (l.moneda === 'ARS' ? '$ ' : 'US$ ') + num(l.precio) : '') + '</span>' +
         '<button type="button" class="mini borrar" data-quitar-item="' + i + '" title="Quitar del pedido">×</button></div>';
-    }).join('') + '<p class="items-total">En el pedido: ' + n + (n === 1 ? ' híbrido' : ' híbridos') + ' · ' + num(total) + ' bolsas</p>' : '';
+    }).join('') + '<p class="items-total">Agregados: ' + n + (n === 1 ? ' híbrido' : ' híbridos') + ' · ' + num(total) + ' bolsas</p>' : '';
     // Con híbridos agregados, la línea de abajo puede quedar vacía.
     [fMov.hibridoId, fMov.banda, fMov.cantidad].forEach(function (c) { c.required = !n; });
-    $('#btn-guardar-mov').textContent = n ? 'Guardar pedido' : 'Guardar';
+    $('#btn-guardar-mov').textContent = n ? 'Guardar todo' : 'Guardar';
   }
 
   $('#btn-agregar-item').addEventListener('click', agregarItem);
@@ -820,6 +832,7 @@
     if (!b) return;
     itemsMov.splice(Number(b.dataset.quitarItem), 1);
     renderItems();
+    mostrarDisponible();
   });
   fMov.tipo.addEventListener('change', mostrarProveedor);
   fMov.banda.addEventListener('change', mostrarDisponible);
@@ -831,7 +844,7 @@
     p.className = 'disponible';
     if (!hid) { p.textContent = ''; return; }
     var banda = fMov.banda.value;
-    var disp = stock(hid, banda, fMov.uid.value);
+    var disp = stock(hid, banda, fMov.uid.value) - (claseDe(fMov.tipo.value) === 'salida' ? enPedido(hid, banda) : 0);
     var txt = 'Stock disponible' + (banda ? ' en ' + banda : ' (todas las bandas)') + ': ' + num(disp) + ' bolsas';
     if (claseDe(fMov.tipo.value) === 'salida' && banda && Number(fMov.cantidad.value) > disp) {
       p.className = 'disponible mal';
@@ -931,19 +944,31 @@
       lineas.push(l);
     }
     if (pideProveedor() && !fMov.proveedor.value.trim()) { e.preventDefault(); aviso('Indicá el proveedor.', true); fMov.proveedor.focus(); return; }
+    var ing = fMov.clase.value === 'ingreso';
+    if (!ing && !fMov.clienteId.value) { e.preventDefault(); aviso('Elegí un cliente.', true); return; }
     var tipo = fMov.tipo.value, pedido = nuevoId(), total = 0;
+    if (claseDe(tipo) === 'salida') {
+      // Control de stock sumando todo lo que se descuenta de cada híbrido y banda.
+      var suma = {}, falta = [];
+      lineas.forEach(function (l) { var k = l.hibridoId + '|' + l.banda; suma[k] = (suma[k] || 0) + l.cantidad; });
+      Object.keys(suma).forEach(function (k) {
+        var p = k.split('|'), disp = stock(p[0], p[1], '');
+        if (suma[k] > disp) falta.push(nombreHibrido(hibrido(p[0])) + ' ' + p[1] + ': hay ' + num(disp) + ', se descuentan ' + num(suma[k]));
+      });
+      if (falta.length && !confirm('Supera el stock:\n' + falta.join('\n') + '\n\n¿Guardar igual?')) { e.preventDefault(); return; }
+    }
     lineas.forEach(function (l, i) {
       total += l.cantidad;
       db.movimientos.push({
         id: nuevoId(), creado: Date.now() + i, pedido: pedido,
-        clase: claseDe(tipo), tipo: tipo, fecha: fMov.fecha.value, clienteId: '',
+        clase: claseDe(tipo), tipo: tipo, fecha: fMov.fecha.value, clienteId: ing ? '' : fMov.clienteId.value,
         proveedor: pideProveedor() ? fMov.proveedor.value.trim().replace(/\s+/g, ' ') : '',
         hibridoId: l.hibridoId, banda: l.banda, cantidad: l.cantidad, precio: l.precio, moneda: l.moneda,
         comprobante: fMov.comprobante.value.trim(), obs: fMov.obs.value.trim()
       });
     });
     itemsMov = [];
-    aviso(tipo + ' guardado: ' + lineas.length + ' híbridos, ' + num(total) + ' bolsas.');
+    aviso('Guardado (' + tipo + '): ' + lineas.length + ' híbridos, ' + num(total) + ' bolsas.');
     guardar();
     refrescar();
   }
