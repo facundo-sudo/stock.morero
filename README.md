@@ -56,3 +56,18 @@ Por eso conviene usar **Copia de seguridad → Bajar copia** seguido. Con esa mi
 Importar el repositorio en Vercel y aceptar. No hay que configurar nada: son archivos estáticos (`index.html`, `styles.css`, `app.js`).
 
 La lectura de Excel usa SheetJS (`vendor/xlsx.full.min.js`, licencia Apache 2.0), incluido en el repositorio.
+
+## Guardado en la nube (Supabase)
+
+Los datos se siguen usando desde el navegador, pero además se copian solos a la nube y,
+al abrir la página en otra PC o en el celular, se trae la versión más nueva.
+Abajo a la izquierda está el botón **«Nube»**: la primera vez en cada equipo se entra con correo y contraseña.
+
+Configuración (una sola vez, sirve para las tres páginas: stock, cotizador y proveedores):
+1. Crear una cuenta gratuita en supabase.com y un proyecto nuevo.
+2. En **SQL Editor** pegar el contenido de `supabase.sql` y tocar **Run**.
+3. En **Authentication → Users → Add user** crear el usuario (correo y contraseña, con «Auto Confirm»).
+   En **Authentication → Sign In / Providers** desactivar «Allow new users to sign up».
+4. En **Project Settings → API** copiar la *Project URL* y la clave *anon public* y ponerlas en `nube-config.js`.
+   La clave anon es pública: los datos quedan protegidos por el usuario y la contraseña.
+Si `nube-config.js` está vacío, la página funciona como antes, solo en el navegador.
