@@ -1963,6 +1963,29 @@
     if ($('#out-posicion').innerHTML) $('#gen-posicion').click();
   });
   function sinCeros() { return $('#sin-ceros-posicion').checked; }
+
+  // Opción «agrupado por híbrido»: suma todas las bandas de cada híbrido en una sola fila (se recuerda).
+  var CLAVE_AGRUPAR = 'morero_posicion_agrupar';
+  try { $('#agrupar-posicion').value = localStorage.getItem(CLAVE_AGRUPAR) === 'hibrido' ? 'hibrido' : 'banda'; } catch (err) { /* no es grave */ }
+  $('#agrupar-posicion').addEventListener('change', function () {
+    try { localStorage.setItem(CLAVE_AGRUPAR, this.value); } catch (err) { /* no es grave */ }
+    if ($('#out-posicion').innerHTML) $('#gen-posicion').click();
+  });
+  function agrupadoPorHibrido() { return $('#agrupar-posicion').value === 'hibrido'; }
+  function agruparPorHibrido(filas) {
+    var porH = {}, orden = [];
+    filas.forEach(function (f) {
+      var g = porH[f.h.id];
+      if (!g) { g = porH[f.h.id] = { h: f.h, bandas: [], v: f.v.map(function () { return 0; }) }; orden.push(g); }
+      if (f.banda && f.banda !== '—') g.bandas.push(f.banda.replace('Banda ', 'B'));
+      f.v.forEach(function (n, i) { g.v[i] += n; });
+    });
+    return orden.map(function (g) { return { h: g.h, banda: g.bandas.length ? 'Todas (' + g.bandas.join(', ') + ')' : '—', v: g.v }; });
+  }
+  function filasPosicion() {
+    var filas = calcularPosicion();
+    return agrupadoPorHibrido() ? agruparPorHibrido(filas) : filas;
+  }
   // En cero: sin stock y sin nada pendiente de recibir ni de remitir.
   function noEnCero(f) { return f.v[COL_SALDO] !== 0 || f.v[COL_RECIBIR] !== 0 || f.v[COL_REMITIR] !== 0; }
 
@@ -1971,7 +1994,7 @@
   }
 
   $('#gen-posicion').addEventListener('click', function () {
-    var filas = calcularPosicion();
+    var filas = filasPosicion();
     var ocultas = filas.length;
     if (sinCeros()) filas = filas.filter(noEnCero);
     ocultas -= filas.length;
@@ -1986,7 +2009,7 @@
     var celdas = function (v) {
       return v.map(function (n, i) { return '<td class="num' + (i === COL_SALDO ? ' disp' + (n < 0 ? ' neg' : '') : '') + '">' + num(n) + '</td>'; }).join('');
     };
-    var html = '<p class="meta">' + esc(descripcionFiltro(filtros.posicion)) + (sinCeros() ? ' · Solo mercadería con stock' : '') +
+    var html = '<p class="meta">' + esc(descripcionFiltro(filtros.posicion)) + (agrupadoPorHibrido() ? ' · Agrupado por híbrido' : '') + (sinCeros() ? ' · Solo mercadería con stock' : '') +
       ' · Cantidades en bolsas' + (ocultas ? ' · ' + ocultas + ' filas en cero ocultas' : '') + '</p>';
     GRANOS.forEach(function (g) {
       var fg = filas.filter(function (f) { return f.h.grano === g; });
@@ -2002,9 +2025,9 @@
   });
 
   $('#xls-posicion').addEventListener('click', function () {
-    var filas = datosPosicion || calcularPosicion().filter(function (f) { return !sinCeros() || noEnCero(f); });
+    var filas = datosPosicion || filasPosicion().filter(function (f) { return !sinCeros() || noEnCero(f); });
     if (!filas.length) { aviso('No hay datos para exportar.', true); return; }
-    var aoa = [['Posición comercial — MORERO Semillas y Cereales S.A.'], [descripcionFiltro(filtros.posicion) + (sinCeros() ? ' · Solo mercadería con stock' : '')], [],
+    var aoa = [['Posición comercial — MORERO Semillas y Cereales S.A.'], [descripcionFiltro(filtros.posicion) + (agrupadoPorHibrido() ? ' · Agrupado por híbrido' : '') + (sinCeros() ? ' · Solo mercadería con stock' : '')], [],
       ['Grano', 'Semillero', 'Híbrido', 'Banda'].concat(COLS_POS)];
     GRANOS.forEach(function (g) {
       var fg = filas.filter(function (f) { return f.h.grano === g; });

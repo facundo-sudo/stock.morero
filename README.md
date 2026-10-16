@@ -72,5 +72,5 @@ Configuración (una sola vez, sirve para las tres páginas: stock, cotizador y p
    La clave anon es pública: los datos quedan protegidos por el usuario y la contraseña.
 Si `nube-config.js` está vacío, la página funciona como antes, solo en el navegador.
 
-- **Posición comercial**: la columna **Disponible para vender** va primero, al lado de la banda. El tilde **«Solo mercadería con stock»** oculta lo que está en cero en disponible, a recibir y a remitir; «Banda» filtra por banda. Las tablas de los reportes se pueden mover arrastrándolas con el mouse.
+- **Posición comercial**: la columna **Disponible para vender** va primero, al lado de la banda. En «Mostrar» se elige **discriminado por banda** o **agrupado por híbrido** (todas las bandas sumadas en una fila). El tilde **«Solo mercadería con stock»** oculta lo que está en cero en disponible, a recibir y a remitir; «Banda» filtra por banda. Las tablas de los reportes se pueden mover arrastrándolas con el mouse.
 - **Observaciones** en reportes y listas: van en una caja baja que se desplaza; al imprimir salen completas, en hoja apaisada y letra más chica.

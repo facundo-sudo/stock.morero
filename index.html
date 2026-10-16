@@ -131,6 +131,12 @@
       <h2>Posición comercial</h2>
       <div class="panel-filtros" data-reporte="posicion"></div>
       <div class="formato">
+        <label>Mostrar
+          <select id="agrupar-posicion">
+            <option value="banda">Discriminado por banda (una fila por híbrido y banda)</option>
+            <option value="hibrido">Agrupado por híbrido (todas las bandas juntas)</option>
+          </select>
+        </label>
         <label class="chk-linea"><input type="checkbox" id="sin-ceros-posicion"> <b>Solo mercadería con stock</b> <small>(oculta lo que tiene en cero el disponible, lo a recibir y lo a remitir)</small></label>
         <p class="ayuda">Para filtrar por banda, usá «Banda» arriba. La tabla se puede mover arrastrándola con el mouse.</p>
       </div>
