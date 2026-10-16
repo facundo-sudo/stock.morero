@@ -346,8 +346,21 @@
   }
 
   // ---------- Render general ----------
+  // Editar una operación desde el Reporte de stock.
+  $('#out-reporte').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-edit-m]');
+    if (!b) return;
+    var m = db.movimientos.find(function (x) { return x.id === b.dataset.editM; });
+    if (m) abrirMov(enVentas(m) ? 'salida' : 'ingreso', m);
+  });
+
   function refrescar() {
     unificarClientes();
+    // Si un reporte está a la vista, se actualiza con el cambio.
+    ['reporte', 'posicion'].forEach(function (r) {
+      var sec = $('#sec-' + r), out = $('#out-' + r);
+      if (sec && sec.classList.contains('activa') && out && out.innerHTML) setTimeout(function () { $('#gen-' + r).click(); }, 0);
+    });
     renderInicio();
     renderHibridos();
     renderClientes();
@@ -1868,7 +1881,7 @@
   (function () {
     var arr = null;
     document.addEventListener('mousedown', function (e) {
-      var c = e.target.closest('.reporte .tabla-cont');
+      var c = e.target.closest('.reporte .tabla-cont, #sec-compras .tabla-cont, #sec-ventas .tabla-cont');
       if (!c || e.button !== 0 || e.target.closest('a,button,input,select,textarea')) return;
       if (c.scrollWidth <= c.clientWidth && c.scrollHeight <= c.clientHeight) return;
       arr = { c: c, x: e.clientX, y: e.clientY, sl: c.scrollLeft, st: c.scrollTop, wy: window.scrollY, movio: false };
@@ -2139,7 +2152,7 @@
           html += '<p class="vacio">Sin operaciones.</p>';
         } else {
           html += '<div class="tabla-cont"><table><thead><tr><th>Fecha</th><th>Operación</th><th>Proveedor / Cliente</th><th>Banda</th>' +
-            '<th class="num">Bolsas del comprobante</th><th class="num">Ingreso stock</th><th class="num">Salida stock</th><th class="num">Saldo</th><th class="num">Precio</th><th>Comprob.</th><th>Obs.</th></tr></thead><tbody>' +
+            '<th class="num">Bolsas del comprobante</th><th class="num">Ingreso stock</th><th class="num">Salida stock</th><th class="num">Saldo</th><th class="num">Precio</th><th>Comprob.</th><th>Obs.</th><th class="acc"></th></tr></thead><tbody>' +
             x.movs.map(function (r) {
               return '<tr' + (debajo(r.m) ? ' class="debajo"' : '') + '><td>' + fechaTxt(r.m.fecha) + '</td><td>' +
                 (debajo(r.m) ? '<span class="flecha">↳</span> ' : '') + '<span class="etq ' + (r.m.clase === 'ingreso' ? 'in' : 'out') + '">' + esc(r.m.tipo) + '</span>' +
@@ -2147,11 +2160,12 @@
                 '<td>' + esc(r.quien) + '</td><td>' + esc(r.m.banda) + '</td><td class="num">' + num(r.m.cantidad) + '</td>' +
                 '<td class="num">' + (r.m.clase === 'ingreso' ? num(r.ing) : '') + '</td><td class="num">' + (r.m.clase === 'salida' ? num(r.sal) : '') + '</td>' +
                 '<td class="num' + (r.saldo < 0 ? ' neg' : '') + '">' + num(r.saldo) + '</td><td class="num">' + precioTxt(r.m) + '</td>' +
-                '<td>' + esc(r.m.comprobante) + '</td><td class="col-obs"><div class="obs-caja">' + (r.nota ? '<small class="vinc">' + esc(r.nota) + '</small><br>' : '') + esc(r.m.obs) + '</div></td></tr>';
+                '<td>' + esc(r.m.comprobante) + '</td><td class="col-obs"><div class="obs-caja">' + (r.nota ? '<small class="vinc">' + esc(r.nota) + '</small><br>' : '') + esc(r.m.obs) + '</div></td>' +
+                '<td class="acc"><button type="button" class="mini" data-edit-m="' + r.m.id + '">Editar</button></td></tr>';
             }).join('') +
             '<tr class="total"><td colspan="5">Stock final</td><td class="num">' + num(x.movs.reduce(function (s, r) { return s + r.ing; }, 0)) +
             '</td><td class="num">' + num(x.movs.reduce(function (s, r) { return s + r.sal; }, 0)) +
-            '</td><td class="num">' + num(x.saldo) + '</td><td colspan="3"></td></tr></tbody></table></div>';
+            '</td><td class="num">' + num(x.saldo) + '</td><td colspan="4"></td></tr></tbody></table></div>';
           if (x.porBanda.length > 1) {
             html += '<div class="pie-ficha">Stock por banda: ' + x.porBanda.map(function (b) {
               return esc(b.banda) + ': <b>' + num(b.saldo) + '</b>';

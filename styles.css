@@ -179,6 +179,10 @@ th { background: var(--gris); color: #fff; font-weight: 600; white-space: nowrap
 tbody tr:hover { background: #fafafa; }
 td.num, th.num { text-align: right; white-space: nowrap; }
 td.acc { white-space: nowrap; text-align: right; }
+/* Botones Editar / Borrar siempre a la vista, a la derecha de la tabla. */
+.tabla-cont td.acc, .tabla-cont th.acc { position: sticky; right: 0; z-index: 1; box-shadow: -2px 0 0 var(--borde); }
+.tabla-cont td.acc { background: var(--blanco); }
+.tabla-cont th.acc { background: var(--gris); }
 .vacio { padding: 18px; text-align: center; color: var(--gris); }
 .flecha { color: var(--bordo); font-weight: 700; }
 tr.debajo td { border-top-color: transparent; }
@@ -379,8 +383,9 @@ dialog label small { font-weight: 400; display: inline; }
 .items-total { font-size: .9rem; font-weight: 600; color: var(--bordo); margin: 2px 0 0; }
 .error-items { color: var(--bordo); font-weight: 600; margin: 6px 0 0; }
 .por-numero { display: block; max-width: 220px; color: var(--bordo); font-weight: 600; line-height: 1.25; margin-top: 3px; }
-.reporte .tabla-cont { cursor: grab; }
-.reporte .tabla-cont.arrastrando { cursor: grabbing; user-select: none; }
+.reporte .tabla-cont, #sec-compras .tabla-cont, #sec-ventas .tabla-cont { cursor: grab; }
+.tabla-cont.arrastrando { cursor: grabbing; user-select: none; }
+.tabla-cont button, .tabla-cont select, .tabla-cont input { cursor: pointer; }
 td.disp { background: var(--bordo-claro); font-weight: 700; }
 th.disp { background: var(--bordo); color: #fff; }
 
