@@ -734,7 +734,7 @@
         '<td class="num">' + num(m.cantidad) + '</td>' +
         '<td class="num' + (ar > 0 ? ' neg' : '') + '">' + (ar == null ? '' : num(ar)) + '</td>' +
         '<td class="num">' + precioTxt(m) + '</td><td>' + esc(m.comprobante) + '</td>' +
-        '<td>' + (vin ? '<small class="vinc">' + esc(vin) + '</small><br>' : '') + esc(m.obs) + '</td>' +
+        '<td class="col-obs"><div class="obs-caja">' + (vin ? '<small class="vinc">' + esc(vin) + '</small><br>' : '') + esc(m.obs) + '</div></td>' +
         '<td class="acc"><button class="mini" data-edit-m="' + m.id + '">Editar</button> ' +
         '<button class="mini borrar" data-del-m="' + m.id + '">Borrar</button></td></tr>';
     }).join('') : '<tr><td colspan="' + cols + '" class="vacio">No hay coincidencias.</td></tr>') + '</tbody>';
@@ -1826,6 +1826,8 @@
       renderPanelesFiltro();
     } else if (e.target.dataset.f === 'banda') {
       f.banda = e.target.value;
+      var r = p.dataset.reporte;
+      if ($('#out-' + r).innerHTML) $('#gen-' + r).click();
     } else if (e.target.type === 'checkbox') {
       var id = e.target.value;
       f.ids = f.ids.filter(function (x) { return x !== id; });
@@ -1862,10 +1864,36 @@
     return partes.join(' · ') + ' · Generado el ' + fechaTxt(hoy());
   }
 
+  // Las tablas anchas de los reportes se pueden mover arrastrando con el mouse (mano), además de la barra.
+  (function () {
+    var arr = null;
+    document.addEventListener('mousedown', function (e) {
+      var c = e.target.closest('.reporte .tabla-cont');
+      if (!c || e.button !== 0 || e.target.closest('a,button,input,select,textarea')) return;
+      if (c.scrollWidth <= c.clientWidth && c.scrollHeight <= c.clientHeight) return;
+      arr = { c: c, x: e.clientX, y: e.clientY, sl: c.scrollLeft, wy: window.scrollY, movio: false };
+      c.classList.add('arrastrando');
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!arr) return;
+      var dx = e.clientX - arr.x, dy = e.clientY - arr.y;
+      if (Math.abs(dx) + Math.abs(dy) > 3) arr.movio = true;
+      arr.c.scrollLeft = arr.sl - dx;
+      window.scrollTo(window.scrollX, arr.wy - dy);
+    });
+    document.addEventListener('mouseup', function () {
+      if (!arr) return;
+      arr.c.classList.remove('arrastrando');
+      arr = null;
+    });
+  })();
+
   // ---------- Posición comercial ----------
-  var COLS_POS = ['Exist. inicial', 'Compras', 'Pedidos', 'Consignada', 'Devol. a semillero', 'Total ingresado', 'Ventas', 'Reservas',
-    'Pedidos clientes', 'Devoluciones', 'Total salidas', 'Saldo', 'Saldo a recibir', 'Saldo a remitir'];
-  var COL_SALDO = 11;
+  // El saldo disponible para vender va primero (al lado de la banda), para verlo sin moverse por la tabla.
+  var COLS_POS = ['Disponible para vender', 'Exist. inicial', 'Compras', 'Pedidos', 'Consignada', 'Devol. a semillero', 'Total ingresado', 'Ventas', 'Reservas',
+    'Pedidos clientes', 'Devoluciones', 'Total salidas', 'Saldo a recibir', 'Saldo a remitir'];
+  var COL_SALDO = 0, COL_RECIBIR = 12, COL_REMITIR = 13;
   var datosPosicion = null;
 
   function calcularPosicion() {
@@ -1895,7 +1923,7 @@
         var pendiente = function (clase) {
           return ms.reduce(function (s, m) { var a = m.clase === clase ? aRemitir(m) : null; return s + (a > 0 ? a : 0); }, 0);
         };
-        filas.push({ h: h, banda: b, v: v.concat([ingr, ven, res, ped, dev, sal, ingr - sal, pendiente('ingreso'), pendiente('salida')]) });
+        filas.push({ h: h, banda: b, v: [ingr - sal].concat(v, [ingr, ven, res, ped, dev, sal, pendiente('ingreso'), pendiente('salida')]) });
       });
     });
     return filas;
@@ -1910,7 +1938,7 @@
   });
   function sinCeros() { return $('#sin-ceros-posicion').checked; }
   // En cero: sin stock y sin nada pendiente de recibir ni de remitir.
-  function noEnCero(f) { return f.v[COL_SALDO] !== 0 || f.v[COL_SALDO + 1] !== 0 || f.v[COL_SALDO + 2] !== 0; }
+  function noEnCero(f) { return f.v[COL_SALDO] !== 0 || f.v[COL_RECIBIR] !== 0 || f.v[COL_REMITIR] !== 0; }
 
   function sumar(filas) {
     return COLS_POS.map(function (_, i) { return filas.reduce(function (s, f) { return s + f.v[i]; }, 0); });
@@ -1928,11 +1956,11 @@
       return;
     }
     var cab = '<thead><tr><th>Semillero</th><th>Híbrido</th><th>Banda</th>' +
-      COLS_POS.map(function (c) { return '<th class="num">' + c + '</th>'; }).join('') + '</tr></thead>';
+      COLS_POS.map(function (c, i) { return '<th class="num' + (i === COL_SALDO ? ' disp' : '') + '">' + c + '</th>'; }).join('') + '</tr></thead>';
     var celdas = function (v) {
-      return v.map(function (n, i) { return '<td class="num' + (i === COL_SALDO && n < 0 ? ' neg' : '') + '">' + num(n) + '</td>'; }).join('');
+      return v.map(function (n, i) { return '<td class="num' + (i === COL_SALDO ? ' disp' + (n < 0 ? ' neg' : '') : '') + '">' + num(n) + '</td>'; }).join('');
     };
-    var html = '<p class="meta">' + esc(descripcionFiltro(filtros.posicion)) + (sinCeros() ? ' · Sin híbridos en cero' : '') +
+    var html = '<p class="meta">' + esc(descripcionFiltro(filtros.posicion)) + (sinCeros() ? ' · Solo mercadería con stock' : '') +
       ' · Cantidades en bolsas' + (ocultas ? ' · ' + ocultas + ' filas en cero ocultas' : '') + '</p>';
     GRANOS.forEach(function (g) {
       var fg = filas.filter(function (f) { return f.h.grano === g; });
@@ -1949,7 +1977,7 @@
   $('#xls-posicion').addEventListener('click', function () {
     var filas = datosPosicion || calcularPosicion().filter(function (f) { return !sinCeros() || noEnCero(f); });
     if (!filas.length) { aviso('No hay datos para exportar.', true); return; }
-    var aoa = [['Posición comercial — MORERO Semillas y Cereales S.A.'], [descripcionFiltro(filtros.posicion) + (sinCeros() ? ' · Sin híbridos en cero' : '')], [],
+    var aoa = [['Posición comercial — MORERO Semillas y Cereales S.A.'], [descripcionFiltro(filtros.posicion) + (sinCeros() ? ' · Solo mercadería con stock' : '')], [],
       ['Grano', 'Semillero', 'Híbrido', 'Banda'].concat(COLS_POS)];
     GRANOS.forEach(function (g) {
       var fg = filas.filter(function (f) { return f.h.grano === g; });
@@ -2068,7 +2096,7 @@
                 '<td>' + esc(r.quien) + '</td><td>' + esc(r.m.banda) + '</td><td class="num">' + num(r.m.cantidad) + '</td>' +
                 '<td class="num">' + (r.m.clase === 'ingreso' ? num(r.ing) : '') + '</td><td class="num">' + (r.m.clase === 'salida' ? num(r.sal) : '') + '</td>' +
                 '<td class="num' + (r.saldo < 0 ? ' neg' : '') + '">' + num(r.saldo) + '</td><td class="num">' + precioTxt(r.m) + '</td>' +
-                '<td>' + esc(r.m.comprobante) + '</td><td>' + (r.nota ? '<small class="vinc">' + esc(r.nota) + '</small><br>' : '') + esc(r.m.obs) + '</td></tr>';
+                '<td>' + esc(r.m.comprobante) + '</td><td class="col-obs"><div class="obs-caja">' + (r.nota ? '<small class="vinc">' + esc(r.nota) + '</small><br>' : '') + esc(r.m.obs) + '</div></td></tr>';
             }).join('') +
             '<tr class="total"><td colspan="5">Stock final</td><td class="num">' + num(x.movs.reduce(function (s, r) { return s + r.ing; }, 0)) +
             '</td><td class="num">' + num(x.movs.reduce(function (s, r) { return s + r.sal; }, 0)) +
