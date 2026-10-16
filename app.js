@@ -1871,7 +1871,7 @@
       var c = e.target.closest('.reporte .tabla-cont');
       if (!c || e.button !== 0 || e.target.closest('a,button,input,select,textarea')) return;
       if (c.scrollWidth <= c.clientWidth && c.scrollHeight <= c.clientHeight) return;
-      arr = { c: c, x: e.clientX, y: e.clientY, sl: c.scrollLeft, wy: window.scrollY, movio: false };
+      arr = { c: c, x: e.clientX, y: e.clientY, sl: c.scrollLeft, st: c.scrollTop, wy: window.scrollY, movio: false };
       c.classList.add('arrastrando');
       e.preventDefault();
     });
@@ -1880,7 +1880,8 @@
       var dx = e.clientX - arr.x, dy = e.clientY - arr.y;
       if (Math.abs(dx) + Math.abs(dy) > 3) arr.movio = true;
       arr.c.scrollLeft = arr.sl - dx;
-      window.scrollTo(window.scrollX, arr.wy - dy);
+      if (arr.c.scrollHeight > arr.c.clientHeight) arr.c.scrollTop = arr.st - dy;
+      else window.scrollTo(window.scrollX, arr.wy - dy);
     });
     document.addEventListener('mouseup', function () {
       if (!arr) return;
@@ -1888,6 +1889,31 @@
       arr = null;
     });
   })();
+
+  // Deja fijas a la izquierda las primeras columnas (semillero, híbrido, banda) y la fila de títulos arriba.
+  function fijarColumnas(cont, n) {
+    $$('.tabla-fija table', cont).forEach(function (t) {
+      var cab = t.querySelector('thead tr');
+      if (!cab) return;
+      var celdas = [];
+      $$('tr', t).forEach(function (tr) {
+        var col = 0;
+        for (var k = 0; k < tr.cells.length && col < n; k++) {
+          var c = tr.cells[k];
+          c.classList.add('fija');   // primero se marca (sin cortar renglones) y después se mide
+          celdas.push({ c: c, col: col });
+          if (col + c.colSpan >= n) c.classList.add('fija-ultima');
+          col += c.colSpan;
+        }
+      });
+      var lefts = [], x = 0;
+      for (var i = 0; i < n && i < cab.cells.length; i++) { lefts.push(x); x += cab.cells[i].getBoundingClientRect().width; }
+      celdas.forEach(function (o) { o.c.style.left = lefts[o.col] + 'px'; });
+    });
+  }
+  window.addEventListener('resize', function () {
+    [['#out-posicion', 4], ['#out-reporte', 3]].forEach(function (s) { var o = $(s[0]); if (o && o.offsetParent) fijarColumnas(o, s[1]); });
+  });
 
   // ---------- Posición comercial ----------
   // El saldo disponible para vender va primero (al lado de la banda), para verlo sin moverse por la tabla.
@@ -1965,13 +1991,14 @@
     GRANOS.forEach(function (g) {
       var fg = filas.filter(function (f) { return f.h.grano === g; });
       if (!fg.length) return;
-      html += '<h4>' + esc(g) + '</h4><div class="tabla-cont"><table>' + cab + '<tbody>' +
+      html += '<h4>' + esc(g) + '</h4><div class="tabla-cont tabla-fija"><table>' + cab + '<tbody>' +
         fg.map(function (f) {
           return '<tr><td>' + esc(f.h.semillero) + '</td><td><b>' + esc(f.h.hibrido) + '</b></td><td>' + esc(f.banda) + '</td>' + celdas(f.v) + '</tr>';
         }).join('') +
         '<tr class="total"><td colspan="3">Total ' + esc(g) + '</td>' + celdas(sumar(fg)) + '</tr></tbody></table></div>';
     });
     out.innerHTML = html;
+    fijarColumnas(out, 4);   // semillero, híbrido, banda y disponible para vender
   });
 
   $('#xls-posicion').addEventListener('click', function () {
@@ -2054,7 +2081,7 @@
       COLS_TOT.map(function (c) { return '<th class="num">' + c + '</th>'; }).join('') + '</tr></thead>';
     // Una sola tabla, para que las columnas queden alineadas también al imprimir.
     var html = '<p class="meta">' + esc(descripcionFiltro(filtros.reporte)) + ' · Solo totales · Cantidades en bolsas</p>' +
-      '<div class="tabla-cont"><table>' + cab + '<tbody>';
+      '<div class="tabla-cont tabla-fija"><table>' + cab + '<tbody>';
     var granos = GRANOS.filter(function (g) { return filas.some(function (f) { return f.h.grano === g; }); });
     granos.forEach(function (g) {
       var fg = filas.filter(function (f) { return f.h.grano === g; });
@@ -2067,6 +2094,7 @@
     if (granos.length > 1) html += '<tr class="total"><td colspan="3">Total general</td>' + celdas(sumarTot(filas)) + '</tr>';
     html += '</tbody></table></div>';
     $('#out-reporte').innerHTML = html;
+    fijarColumnas($('#out-reporte'), 3);
   }
 
   $('#gen-reporte').addEventListener('click', function () {
